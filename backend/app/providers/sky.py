@@ -1,8 +1,11 @@
 """Taivaankartta: planeetat Skyfieldillä, kirkkaat tähdet staattisesta luettelosta."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from functools import lru_cache
+
+from fastapi import HTTPException
 
 from app.cache import cache
 from app.config import get_settings
@@ -65,8 +68,8 @@ def moon_phase_name(deg: float) -> str:
 
 
 def _build(lat: float, lon: float, elev: float, at: datetime, place: str) -> SkyChart:
-    from skyfield.api import Star, wgs84
     from skyfield import almanac
+    from skyfield.api import Star, wgs84
 
     eph, ts = _skyfield()
     t = ts.from_datetime(at.astimezone(timezone.utc))
@@ -75,8 +78,7 @@ def _build(lat: float, lon: float, elev: float, at: datetime, place: str) -> Sky
     objects: list[SkyObject] = []
 
     def add_solar(name: str, body_key: str, kind: str) -> float:
-        astrometric = observer.at(t).observe(eph[body_key]).apparent()
-        alt, az, _ = astrometric.altaz()
+        alt, az, _ = observer.at(t).observe(eph[body_key]).apparent().altaz()
         objects.append(SkyObject(name=name, kind=kind, alt=round(alt.degrees, 2), az=round(az.degrees, 2)))
         return alt.degrees
 
@@ -88,7 +90,9 @@ def _build(lat: float, lon: float, elev: float, at: datetime, place: str) -> Sky
     for name, ra_h, dec_d, mag in BRIGHT_STARS:
         try:
             alt, az, _ = observer.at(t).observe(Star(ra_hours=ra_h, dec_degrees=dec_d)).apparent().altaz()
-            objects.append(SkyObject(name=name, kind="star", alt=round(alt.degrees, 2), az=round(az.degrees, 2), magnitude=mag))
+            objects.append(
+                SkyObject(name=name, kind="star", alt=round(alt.degrees, 2), az=round(az.degrees, 2), magnitude=mag)
+            )
         except Exception:
             continue
 
@@ -107,14 +111,22 @@ def _build(lat: float, lon: float, elev: float, at: datetime, place: str) -> Sky
     )
 
 
+async def _build_async(lat: float, lon: float, elev: float, at: datetime, place: str) -> SkyChart:
+    return await asyncio.to_thread(_build, lat, lon, elev, at, place)
+
+
 async def get_sky_chart(lat: float, lon: float, at: datetime, place: str | None = None) -> SkyChart:
     s = get_settings()
     place = place or s.default_place
     key = f"sky:{lat:.3f}:{lon:.3f}:{at.strftime('%Y%m%d%H%M')}"
-    return await cache.get_or_set(key, s.ttl_sky, lambda: _build_async(lat, lon, s.default_elevation_m, at, place))
-
-
-async def _build_async(lat: float, lon: float, elev: float, at: datetime, place: str) -> SkyChart:
-    import asyncio
-
-    return await asyncio.to_thread(_build, lat, lon, elev, at, place)
+    try:
+        return await cache.get_or_set(
+            key, s.ttl_sky, lambda: _build_async(lat, lon, s.default_elevation_m, at, place)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # kerrotaan syy selkeästi 500:n sijaan
+        raise HTTPException(
+            status_code=503,
+            detail=f"Taivaankartan laskenta epäonnistui: {type(exc).__name__}: {exc}",
+        ) from exc
