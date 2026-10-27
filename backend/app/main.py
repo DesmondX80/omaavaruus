@@ -2,6 +2,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,16 @@ from app.providers.sky import get_sky_chart
 from app.providers.space_weather import get_space_weather
 
 s = get_settings()
+
+# Staattiset tiedostot etsitään suhteessa koodiin, ei nykyiseen hakemistoon,
+# jotta sovellus toimii sekä repossa (backend/) että Dockerissa (/app).
+_APP_DIR = Path(__file__).resolve().parent
+_CANDIDATES = [
+    _APP_DIR / "frontend",             # jos frontend kopioidaan paketin sisään
+    _APP_DIR.parent / "frontend",      # Docker: /app/frontend
+    _APP_DIR.parents[1] / "frontend",  # repo: <juuri>/frontend
+]
+FRONTEND_DIR = next((p for p in _CANDIDATES if p.is_dir()), None)
 
 
 @asynccontextmanager
@@ -91,4 +102,12 @@ async def sky(
     return await get_sky_chart(lat, lon, moment)
 
 
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+if FRONTEND_DIR is not None:
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+else:
+    @app.get("/")
+    async def frontend_missing() -> dict:
+        return {
+            "detail": "frontend/-hakemistoa ei löytynyt",
+            "api": ["/api/health", "/api/spaceweather", "/api/launches", "/api/sky"],
+        }
