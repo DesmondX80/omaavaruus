@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      OMAVARUUS_DEFAULT_LAT: "65.0121"
+      OMAVARUUS_DEFAULT_LON: "25.4651"
+      OMAVARUUS_DEFAULT_PLACE: "Oulu"
+    volumes:
+      - ./frontend:/app/frontend:ro
+

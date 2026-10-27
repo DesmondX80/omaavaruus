@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OmaAvaruus</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>OmaAvaruus</h1>
+    <p class="sub">Avaruussää · taivaankartta · laukaisut</p>
+    <div id="clock" class="clock"></div>
+  </header>
+
+  <main>
+    <section class="card" id="weather">
+      <h2>Avaruussää</h2>
+      <div class="kp-row">
+        <div class="kp-badge"><span id="kp">–</span><small>Kp nyt</small></div>
+        <div>
+          <div id="g-label" class="g-label">Ladataan…</div>
+          <div id="aurora" class="aurora">Revontulimahdollisuus: –</div>
+          <div id="wind" class="muted"></div>
+        </div>
+      </div>
+      <svg id="kp-chart" viewBox="0 0 320 110" role="img" aria-label="Kp-indeksin kehitys"></svg>
+      <ul id="alerts" class="alerts"></ul>
+    </section>
+
+    <section class="card" id="sky">
+      <h2>Taivaankartta</h2>
+      <div class="sky-controls">
+        <label>Aika <input type="range" id="time-offset" min="-720" max="720" step="10" value="0" /></label>
+        <span id="time-label" class="muted"></span>
+      </div>
+      <svg id="sky-chart" viewBox="0 0 400 400" role="img" aria-label="Taivaankartta"></svg>
+      <div id="sky-meta" class="muted"></div>
+      <div id="object-list" class="objects"></div>
+    </section>
+
+    <section class="card" id="launches">
+      <h2>Laukaisut <span class="live">LIVE</span></h2>
+      <div id="next-launch" class="next-launch">Ladataan…</div>
+      <ol id="launch-list" class="launch-list"></ol>
+    </section>
+  </main>
+
+  <script src="sky.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
