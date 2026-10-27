@@ -1,6 +1,7 @@
 const API = location.origin.replace(/\/$/, "");
-const state = { lat: null, lon: null, timeOffset: 0 };
+const state = { lat: null, lon: null, place: "", timeOffset: 0 };
 
+const $ = (id) => document.getElementById(id);
 const fmt = (d) => new Date(d).toLocaleString("fi-FI", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 function countdown(target) {
@@ -10,36 +11,35 @@ function countdown(target) {
   return h > 0 ? `${h} h ${m} min` : `${m} min ${s} s`;
 }
 
-async function loadConfig() {
-  const c = await (await fetch(`${API}/api/config`)).json();
-  Object.assign(state, { lat: c.default_lat, lon: c.default_lon });
-  geolocate();
-}
-
-function geolocate() {
-  if (!navigator.geolocation) return refreshSky();
-  navigator.geolocation.getCurrentPosition(
-    (pos) => { state.lat = pos.coords.latitude; state.lon = pos.coords.longitude; refreshSky(); },
-    () => refreshSky(),
-    { timeout: 4000 }
-  );
+async function getJSON(path) {
+  const res = await fetch(API + path);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
+  return res.json();
 }
 
 async function loadWeather() {
-  const w = await (await fetch(`${API}/api/spaceweather?lat=${state.lat ?? ""}`)).json();
-  document.getElementById("kp").textContent = w.kp_now.toFixed(1);
-  document.getElementById("g-label").textContent = w.g_label;
-  document.getElementById("aurora").textContent = `Revontulimahdollisuus: ${w.aurora_chance}`;
-  document.getElementById("wind").textContent =
-    [w.solar_wind_speed_kms ? `Aurinkotuuli ${Math.round(w.solar_wind_speed_kms)} km/s` : null,
-     w.bz_nt != null ? `Bz ${w.bz_nt.toFixed(1)} nT` : null].filter(Boolean).join(" · ");
-  document.getElementById("alerts").innerHTML =
-    (w.alerts || []).map((a) => `<li>${a.replace(/</g, "&lt;")}</li>`).join("");
+  try {
+    const q = state.lat == null ? "" : `?lat=${state.lat}`;
+    const w = await getJSON(`/api/spaceweather${q}`);
+    $("kp").textContent = w.kp_now.toFixed(1);
+    $("g-label").textContent = w.g_label;
+    $("aurora").textContent = `Revontulimahdollisuus: ${w.aurora_chance}`;
+    $("wind").textContent =
+      [w.solar_wind_speed_kms ? `Aurinkotuuli ${Math.round(w.solar_wind_speed_kms)} km/s` : null,
+       w.bz_nt != null ? `Bz ${w.bz_nt.toFixed(1)} nT` : null].filter(Boolean).join(" · ");
+    $("alerts").innerHTML = (w.alerts || []).map((a) => `<li>${a.replace(/</g, "&lt;")}</li>`).join("");
+    drawKpLine(w);
+  } catch (err) {
+    $("g-label").textContent = `Avaruussään lataus epäonnistui (${err.message})`;
+  }
+}
 
-  const svg = document.getElementById("kp-chart");
+function drawKpLine(w) {
+  const svg = $("kp-chart");
   svg.innerHTML = "";
   const pts = w.kp_forecast.length ? [...w.kp_history.slice(-8), ...w.kp_forecast.slice(0, 8)] : w.kp_history;
-  const n = pts.length || 1;
+  if (!pts.length) return;
+  const n = pts.length;
   const ns = "http://www.w3.org/2000/svg";
   const scale = (kp) => 100 - (kp / 9) * 90;
   const path = pts.map((p, i) => `${i ? "L" : "M"}${(i / Math.max(n - 1, 1)) * 310 + 5},${scale(p.kp)}`).join(" ");
@@ -60,56 +60,92 @@ async function loadWeather() {
 
 async function refreshSky() {
   if (state.lat == null) return;
-  const at = new Date(Date.now() + state.timeOffset * 60000).toISOString();
-  const chart = await (await fetch(`${API}/api/sky?lat=${state.lat}&lon=${state.lon}&at=${at}`)).json();
-  drawSky(document.getElementById("sky-chart"), chart);
-  document.getElementById("time-label").textContent = fmt(chart.at);
-  document.getElementById("sky-meta").textContent =
-    `${chart.observer.place} ${chart.observer.lat.toFixed(2)}°, ${chart.observer.lon.toFixed(2)}° · Kuu ${chart.moon_phase_deg.toFixed(0)}° (${chart.moon_phase_name})`;
-  document.getElementById("object-list").innerHTML = chart.objects
-    .filter((o) => o.alt > 0 && o.kind !== "star")
-    .map((o) => `<span>${o.name} ${o.alt.toFixed(0)}°</span>`)
-    .join("");
+  try {
+    const at = new Date(Date.now() + state.timeOffset * 60000).toISOString();
+    const chart = await getJSON(`/api/sky?lat=${state.lat}&lon=${state.lon}&at=${at}`);
+    drawSky($("sky-chart"), chart);
+    $("time-label").textContent = fmt(chart.at);
+    $("sky-meta").textContent =
+      `${chart.observer.place} ${chart.observer.lat.toFixed(2)}°, ${chart.observer.lon.toFixed(2)}° · Kuu ${chart.moon_phase_deg.toFixed(0)}° (${chart.moon_phase_name})`;
+    $("object-list").innerHTML = chart.objects
+      .filter((o) => o.alt > 0 && o.kind !== "star")
+      .map((o) => `<span>${o.name} ${o.alt.toFixed(0)}°</span>`)
+      .join("");
+  } catch (err) {
+    $("sky-meta").textContent = `Taivaankartan lataus epäonnistui (${err.message})`;
+  }
 }
 
 function renderLaunches(board) {
-  const next = board.next_launch;
-  document.getElementById("next-launch").innerHTML = next
-    ? `<b>${next.name}</b><span class="countdown">T-${countdown(next.net)}</span><small>${fmt(next.net)} · ${next.provider} · ${next.location}</small>`
-    : "Ei tulevia laukaisuja.";
-  document.getElementById("launch-list").innerHTML = board.results
-    .map((l) => `<li><div><b>${l.name}</b><small>${fmt(l.net)} · ${l.rocket} · ${l.status}</small></div>
-                 <div class="countdown">${countdown(l.net)}</div></li>`)
-    .join("");
+  try {
+    const next = board.next_launch;
+    $("next-launch").innerHTML = next
+      ? `<b>${next.name}</b><span class="countdown">T-${countdown(next.net)}</span><small>${fmt(next.net)} · ${next.provider} · ${next.location}</small>`
+      : "Ei tulevia laukaisuja.";
+    $("launch-list").innerHTML = board.results
+      .map((l) => `<li><div><b>${l.name}</b><small>${fmt(l.net)} · ${l.rocket} · ${l.status}</small></div>
+                   <div class="countdown">${countdown(l.net)}</div></li>`)
+      .join("");
+  } catch (err) {
+    $("next-launch").textContent = `Laukaisujen näyttö epäonnistui (${err.message})`;
+  }
 }
 
 function subscribeLaunches() {
+  if (!("EventSource" in window)) return pollLaunches();
   const es = new EventSource(`${API}/api/launches/stream`);
   es.addEventListener("launches", (e) => renderLaunches(JSON.parse(e.data)));
   es.addEventListener("error", () => {
     es.close();
-    fetch(`${API}/api/launches`).then((r) => r.json()).then(renderLaunches);
+    pollLaunches();
     setTimeout(subscribeLaunches, 30000);
   });
-  setInterval(() => {
-    fetch(`${API}/api/launches`).then((r) => r.json()).then(renderLaunches).catch(() => {});
-  }, 60000);
+}
+
+async function pollLaunches() {
+  try {
+    renderLaunches(await getJSON("/api/launches"));
+  } catch (err) {
+    $("next-launch").textContent = `Laukaisujen lataus epäonnistui (${err.message})`;
+  }
 }
 
 function tickClock() {
-  document.getElementById("clock").textContent =
-    new Date().toLocaleString("fi-FI", { dateStyle: "full", timeStyle: "medium" });
+  $("clock").textContent = new Date().toLocaleString("fi-FI", { dateStyle: "full", timeStyle: "medium" });
 }
 
-document.getElementById("time-offset").addEventListener("input", (e) => {
-  state.timeOffset = Number(e.target.value);
-  refreshSky();
-});
+function tryGeolocate() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      state.lat = pos.coords.latitude;
+      state.lon = pos.coords.longitude;
+      loadWeather();
+      refreshSky();
+    },
+    () => {},
+    { timeout: 4000 }
+  );
+}
 
-tickClock();
-setInterval(tickClock, 1000);
-loadConfig();
-loadWeather();
-subscribeLaunches();
-setInterval(loadWeather, 300000);
-setInterval(refreshSky, 60000);
+(async function init() {
+  tickClock();
+  setInterval(tickClock, 1000);
+  $("time-offset").addEventListener("input", (e) => {
+    state.timeOffset = Number(e.target.value);
+    refreshSky();
+  });
+  try {
+    const c = await getJSON("/api/config");
+    Object.assign(state, { lat: c.default_lat, lon: c.default_lon, place: c.default_place });
+  } catch (err) {
+    $("g-label").textContent = `Konfiguraation lataus epäonnistui (${err.message})`;
+  }
+  await loadWeather();
+  await refreshSky();
+  pollLaunches();
+  subscribeLaunches();
+  tryGeolocate();
+  setInterval(loadWeather, 300000);
+  setInterval(refreshSky, 60000);
+})();
