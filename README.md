@@ -1,7 +1,10 @@
 # OmaAvaruus
 
-Avaruussään, taivaankartan ja rakettilaukaisujen pohjasovellus. Backend on FastAPI,
-frontend on kevyt vanilla-JS/SVG-käyttöliittymä, joka tarjoillaan samasta palvelusta.
+Avaruussään, taivaankartan ja rakettilaukaisujen pohjasovellus. Backend on Cloudflare
+Worker (TypeScript), frontend kevyt vanilla-JS/SVG-käyttöliittymä GitHub Pagesissa.
+
+- Sovellus: https://desmondx80.github.io/omaavaruus/
+- API: https://omaavaruus-api.desmond80x.workers.dev
 
 ## Pika-aloitus
 
@@ -9,68 +12,44 @@ frontend on kevyt vanilla-JS/SVG-käyttöliittymä, joka tarjoillaan samasta pal
 cd ~/projektit
 git clone git@github.com:DesmondX80/omaavaruus.git omaavaruus
 cd omaavaruus
-make install     # luo backend/.venv ja asentaa riippuvuudet
-make dev         # http://localhost:8000
+make dev         # http://localhost:8787 (Worker tarjoilee myös frontendin)
+make test
 ```
 
-Kaikki `make`-komennot ajetaan repon juuresta, jossa `Makefile` sijaitsee. Venv on
-`backend/.venv`, ja `make dev` käynnistää sen omalla Pythonilla, joten järjestelmän
-Python tai globaali `uvicorn` ei pääse sotkemaan ympäristöä. Tarkistus: `make doctor`.
-
-Tai Dockerilla:
-
-```bash
-docker compose up --build
-```
+Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemiston npm-skriptejä.
 
 ## Ominaisuudet (v0.1)
 
 - **Avaruussää**: Kp-indeksi (NOAA SWPC), G-asteikko, aurinkotuulen nopeus, Bz, hälytykset ja revontuliarvio havaintopaikan leveysasteelle.
-- **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja ~55 kirkkainta tähteä atsimuutti-korkeuskoordinaateissa (Skyfield + DE421). Aikaslider ±12 h.
-- **Laukaisut**: The Space Devs Launch Library 2, seuraava laukaisu ja lähtölaskenta. Päivitys SSE-striiminä (`/api/launches/stream`).
+- **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja ~55 kirkkainta tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). Aikaslider ±12 h.
+- **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta.
 
 ## Rakenne
 
 ```
-backend/app/
-  main.py            # FastAPI-reitit + SSE + staattinen frontend
-  config.py          # pydantic-settings, .env
-  models.py          # API-skeemat
-  cache.py           # TTL-välimuisti ulkoisten API:en suojaksi
-  providers/
-    http.py          # jaettu httpx-client + SWPC-muodon normalisointi
-    space_weather.py # NOAA SWPC
-    launches.py      # Launch Library 2
-    sky.py           # Skyfield + kirkkaat tähdet
-frontend/            # index.html, styles.css, app.js, sky.js
+worker/
+  wrangler.toml      # Workerin asetukset, oletuspaikka, CORS-originit
+  src/
+    index.ts         # reititys, parametrien tarkistus, CORS
+    http.ts          # TTL-välimuisti, fetch + SWPC-muodon normalisointi
+    spaceweather.ts  # NOAA SWPC
+    launches.ts      # RocketLaunch.Live + uudelleenyrityksen odotus
+    sky.ts           # astronomy-engine + kirkkaat tähdet (stars.ts)
+  test/              # vitest
+frontend/            # index.html, styles.css, app.js, sky.js, config.js (API-osoite)
 ```
 
-## Julkaisu: Cloudflare Worker + GitHub Pages
+## Julkaisu
 
-Tuotannossa backend on Cloudflare Worker (`worker/`, TypeScript) ja frontend GitHub
-Pagesissa. Worker toteuttaa saman `/api/*`-rajapinnan kuin FastAPI-backend; taivaankartta
-lasketaan [astronomy-enginellä](https://github.com/cosinekitty/astronomy), koska Skyfield
-ja DE421-efemeridi eivät mahdu Workerin kokorajoihin (ero Skyfieldiin ~0,01°).
+Push `main`-haaraan julkaisee muutokset automaattisesti:
 
-```bash
-cd worker
-npm install
-npm test
-npm run dev        # http://localhost:8787 (Worker tarjoilee myös frontendin)
-npx wrangler login
-npm run deploy     # -> https://omaavaruus-api.<tili>.workers.dev
-```
+- `worker.yml` ajaa testit ja julkaisee Workerin (secretit `CLOUDFLARE_API_TOKEN`,
+  `CLOUDFLARE_ACCOUNT_ID`; token pohjalla *Edit Cloudflare Workers*).
+- `pages.yml` julkaisee `frontend/`-hakemiston GitHub Pagesiin ja kirjoittaa repon
+  muuttujan `OMAVARUUS_API` (Workerin osoite) `config.js`:ään.
 
-Automaattinen julkaisu `main`-haaraan pushatessa:
-
-1. **Cloudflare**: luo API-token (pohja *Edit Cloudflare Workers*) ja lisää repoon secretit
-   `CLOUDFLARE_API_TOKEN` ja `CLOUDFLARE_ACCOUNT_ID`. Työnkulku `worker.yml` julkaisee Workerin.
-2. **GitHub Pages**: Settings → Pages → Source: *GitHub Actions*. Lisää repon muuttuja
-   (Settings → Secrets and variables → Actions → Variables) `OMAVARUUS_API` =
-   Workerin osoite. Työnkulku `pages.yml` kirjoittaa sen `config.js`:ään.
-3. Sallitut CORS-originit ovat `worker/wrangler.toml`:n `CORS_ORIGINS`-muuttujassa.
-
-Workerissa ei ole SSE-reittiä `/api/launches/stream`; frontend käyttää tavallista pollausta.
+Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
+`worker/wrangler.toml`:n `CORS_ORIGINS`-muuttujassa.
 
 ## API
 
@@ -79,8 +58,7 @@ Workerissa ei ole SSE-reittiä `/api/launches/stream`; frontend käyttää taval
 | `GET /api/health` | Terveystarkistus |
 | `GET /api/config` | Oletuskoordinaatit |
 | `GET /api/spaceweather?lat=65.0` | Kp-historia ja -ennuste, aurinkotuuli, revontuliarvio |
-| `GET /api/launches` | 10 seuraavaa laukaisua |
-| `GET /api/launches/stream` | SSE, päivitys 60 s välein |
+| `GET /api/launches` | 5 seuraavaa laukaisua |
 | `GET /api/sky?lat&lon&at` | Taivaankartta hetkelle |
 
 ## Seuraavat askeleet
@@ -88,4 +66,4 @@ Workerissa ei ole SSE-reittiä `/api/launches/stream`; frontend käyttää taval
 1. Kääri taivaankartta WebGL:ään (esim. three.js) ja lisää tähtikuvioiden viivat.
 2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit ja revontulien näkyvyysrajapyykki (esim. Kp + pilvisyys FMI:ltä).
 3. Suodata laukaisut suosikkitoimijoittain ja tallenna ilmoitukset (web push).
-4. Välimuisti Redisillä, jos instansseja on useampi.
+4. Jaettu välimuisti Workers KV:llä, jos isolaattikohtainen välimuisti ei riitä.

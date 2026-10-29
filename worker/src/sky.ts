@@ -50,7 +50,7 @@ export function getSkyChart(lat: number, lon: number, elevationM: number, at: Da
   const observer = new Observer(lat, lon, elevationM);
   const objects: SkyObject[] = [];
 
-  // Näennäinen paikka ilman ilmakehän taittumista, kuten aiemmassa Skyfield-toteutuksessa
+  // Näennäinen paikka ilman ilmakehän taittumista
   const add = (name: string, kind: SkyObject["kind"], ra: number, dec: number, magnitude: number | null = null) => {
     const hor = Horizon(time, observer, ra, dec);
     objects.push({ name, kind, alt: round(hor.altitude, 2), az: round(hor.azimuth, 2), magnitude, extra: null });

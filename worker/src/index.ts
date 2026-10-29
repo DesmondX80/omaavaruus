@@ -12,7 +12,7 @@ export interface Env {
   CORS_ORIGINS: string;
 }
 
-/** Lukee numeerisen kyselyparametrin ja tarkistaa rajat (FastAPI:n Query(ge, le) -vastine). */
+/** Lukee numeerisen kyselyparametrin ja tarkistaa rajat. */
 function numberParam(url: URL, name: string, fallback: number, min: number, max: number): number {
   const raw = url.searchParams.get(name);
   if (raw === null || raw === "") return fallback;
