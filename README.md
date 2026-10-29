@@ -45,6 +45,33 @@ backend/app/
 frontend/            # index.html, styles.css, app.js, sky.js
 ```
 
+## Julkaisu: Cloudflare Worker + GitHub Pages
+
+Tuotannossa backend on Cloudflare Worker (`worker/`, TypeScript) ja frontend GitHub
+Pagesissa. Worker toteuttaa saman `/api/*`-rajapinnan kuin FastAPI-backend; taivaankartta
+lasketaan [astronomy-enginellä](https://github.com/cosinekitty/astronomy), koska Skyfield
+ja DE421-efemeridi eivät mahdu Workerin kokorajoihin (ero Skyfieldiin ~0,01°).
+
+```bash
+cd worker
+npm install
+npm test
+npm run dev        # http://localhost:8787 (Worker tarjoilee myös frontendin)
+npx wrangler login
+npm run deploy     # -> https://omaavaruus-api.<tili>.workers.dev
+```
+
+Automaattinen julkaisu `main`-haaraan pushatessa:
+
+1. **Cloudflare**: luo API-token (pohja *Edit Cloudflare Workers*) ja lisää repoon secretit
+   `CLOUDFLARE_API_TOKEN` ja `CLOUDFLARE_ACCOUNT_ID`. Työnkulku `worker.yml` julkaisee Workerin.
+2. **GitHub Pages**: Settings → Pages → Source: *GitHub Actions*. Lisää repon muuttuja
+   (Settings → Secrets and variables → Actions → Variables) `OMAVARUUS_API` =
+   Workerin osoite. Työnkulku `pages.yml` kirjoittaa sen `config.js`:ään.
+3. Sallitut CORS-originit ovat `worker/wrangler.toml`:n `CORS_ORIGINS`-muuttujassa.
+
+Workerissa ei ole SSE-reittiä `/api/launches/stream`; frontend käyttää tavallista pollausta.
+
 ## API
 
 | Reitti | Kuvaus |

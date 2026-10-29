@@ -1,0 +1,37 @@
+name: Pages
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kokoa sivusto ja aseta API-osoite
+        env:
+          OMAVARUUS_API: ${{ vars.OMAVARUUS_API }}
+        run: |
+          test -n "$OMAVARUUS_API" || { echo "::error::Aseta repon muuttuja OMAVARUUS_API (Worker-osoite)"; exit 1; }
+          cp -r frontend _site
+          printf 'window.OMAVARUUS_API = %s;\n' "$(jq -Rn --arg v "$OMAVARUUS_API" '$v')" > _site/config.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,8 +1,9 @@
 const state = {lat:65.0121, lon:25.4651, offset:0};
 const el = id => document.getElementById(id);
+const API = (window.OMAVARUUS_API || "").replace(/\/$/, "");
 const fmt = d => d ? new Date(d).toLocaleString('fi-FI') : 'Aika tarkentuu';
 async function json(path) {
-  const r = await fetch(path, {signal:AbortSignal.timeout(45000)});
+  const r = await fetch(API + path, {signal:AbortSignal.timeout(45000)});
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
   return body;

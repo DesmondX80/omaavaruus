@@ -1,0 +1,18 @@
+name = "omaavaruus-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Frontend tarjoillaan myös Workerista, joten `npm run dev` ajaa koko sovelluksen
+# paikallisesti. Tuotannossa frontend on GitHub Pagesissa; /api/* menee aina Workerille.
+[assets]
+directory = "../frontend"
+run_worker_first = ["/api/*"]
+
+[vars]
+DEFAULT_LAT = "65.0121"
+DEFAULT_LON = "25.4651"
+DEFAULT_ELEVATION_M = "20"
+DEFAULT_PLACE = "Oulu"
+LAUNCH_LIMIT = "10"
+# Pilkulla eroteltu lista sallituista origineista (CORS)
+CORS_ORIGINS = "https://desmondx80.github.io,http://localhost:8000,http://localhost:8787"
