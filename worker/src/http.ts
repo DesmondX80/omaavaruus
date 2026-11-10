@@ -21,15 +21,23 @@ export function cached<T>(key: string, ttlS: number, factory: () => Promise<T>):
   return value;
 }
 
-/** Hakee JSONin; Cloudflaren reunavälimuisti jakaa vastauksen isolaattien kesken. */
-export async function fetchJson(url: string, cacheTtl: number): Promise<unknown> {
+/** Hakee resurssin; Cloudflaren reunavälimuisti jakaa vastauksen isolaattien kesken. */
+async function fetchOk(url: string, cacheTtl: number, accept: string): Promise<Response> {
   const resp = await fetch(url, {
-    headers: { "User-Agent": "OmaAvaruus/0.1", Accept: "application/json" },
+    headers: { "User-Agent": "OmaAvaruus/0.1", Accept: accept },
     cf: { cacheTtl, cacheEverything: true },
     signal: AbortSignal.timeout(10_000),
   });
   if (!resp.ok) throw new HttpError(resp.status, `HTTP ${resp.status}`, retryAfter(resp));
-  return resp.json();
+  return resp;
+}
+
+export async function fetchJson(url: string, cacheTtl: number): Promise<unknown> {
+  return (await fetchOk(url, cacheTtl, "application/json")).json();
+}
+
+export async function fetchText(url: string, cacheTtl: number, accept = "*/*"): Promise<string> {
+  return (await fetchOk(url, cacheTtl, accept)).text();
 }
 
 function retryAfter(resp: Response): Record<string, string> {

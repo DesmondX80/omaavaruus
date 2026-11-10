@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
+import { parseFmiSimple } from "../src/clouds";
 import { asRecords } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { moonPhaseName } from "../src/sky";
-import { auroraChance, kpToGScale, parseTs } from "../src/spaceweather";
+import { auroraChance, cloudAdjustedChance, kpToGScale, parseTs } from "../src/spaceweather";
 
 const env: Env = {
   DEFAULT_LAT: "65.0121",
@@ -14,6 +15,16 @@ const env: Env = {
   LAUNCH_LIMIT: "10",
   CORS_ORIGINS: "https://desmondx80.github.io",
 };
+
+const fmiXml = (rows: [string, string, string][]) =>
+  `<wfs:FeatureCollection>${rows
+    .map(
+      ([time, name, value]) =>
+        `<wfs:member><BsWfs:BsWfsElement gml:id="x"><BsWfs:Time>${time}</BsWfs:Time>` +
+        `<BsWfs:ParameterName>${name}</BsWfs:ParameterName><BsWfs:ParameterValue>${value}</BsWfs:ParameterValue>` +
+        `</BsWfs:BsWfsElement></wfs:member>`,
+    )
+    .join("")}</wfs:FeatureCollection>`;
 
 const get = (path: string, headers: Record<string, string> = {}) =>
   worker.fetch(new Request(`https://api.test${path}`, { headers }), env);
@@ -30,6 +41,28 @@ describe("apufunktiot", () => {
 
   it("arvioi revontulet Oulussa", () => {
     expect(["Hyvä", "Erittäin hyvä"]).toContain(auroraChance(5, 65.0));
+  });
+
+  it("huomioi pilvisyyden revontuliarviossa", () => {
+    expect(cloudAdjustedChance("Erittäin hyvä", 10)).toBe("Erittäin hyvä");
+    expect(cloudAdjustedChance("Erittäin hyvä", 50)).toBe("Hyvä");
+    expect(cloudAdjustedChance("Erittäin hyvä", 80)).toBe("Mahdollinen");
+    expect(cloudAdjustedChance("Hyvä", 95)).toBe("Epätodennäköinen");
+    expect(cloudAdjustedChance("Mahdollinen", 80)).toBe("Epätodennäköinen");
+    expect(cloudAdjustedChance("Hyvä", null)).toBe("Hyvä");
+  });
+
+  it("purkaa FMI:n WFS-vastauksen", () => {
+    const xml = fmiXml([
+      ["2026-11-10T15:00:00Z", "TotalCloudCover", "40.5"],
+      ["2026-11-10T14:00:00Z", "TotalCloudCover", "99.5"],
+      ["2026-11-10T14:00:00Z", "LowCloudCover", "10"],
+      ["2026-11-10T16:00:00Z", "TotalCloudCover", "NaN"],
+    ]);
+    expect(parseFmiSimple(xml, "TotalCloudCover")).toEqual([
+      { time_tag: "2026-11-10T14:00:00.000Z", cloud_cover: 99.5 },
+      { time_tag: "2026-11-10T15:00:00.000Z", cloud_cover: 40.5 },
+    ]);
   });
 
   it("nimeää kuun vaiheen", () => {
@@ -106,17 +139,73 @@ describe("reitit", () => {
         if (url.endsWith("solar-wind-speed.json")) return Response.json([{ proton_speed: 512, time_tag: "2026-10-29T09:03:00Z" }]);
         if (url.endsWith("solar-wind-mag-field.json")) return Response.json([{ bt: 6, bz_gsm: -4 }]);
         if (url.endsWith("forecast.json")) return Response.json([["time_tag", "kp", "observed"], ["2026-10-30 00:00:00", "4", "predicted"]]);
+        if (url.startsWith("https://opendata.fmi.fi/")) {
+          expect(new URL(url).searchParams.get("latlon")).toBe("65.0123,25.4651");
+          return new Response(
+            fmiXml([
+              ["2026-10-29T10:00:00Z", "TotalCloudCover", "80"],
+              ["2026-10-29T11:00:00Z", "TotalCloudCover", "20"],
+            ]),
+          );
+        }
         return Response.json([]);
       }),
     );
-    const r = await get("/api/spaceweather?lat=65");
+    const r = await get("/api/spaceweather?lat=65.01234&lon=25.46511");
     expect(r.status).toBe(200);
     const body = await r.json<any>();
     expect(body.kp_now).toBe(5.33);
     expect(body.g_label).toBe("G1 – heikko myrsky");
     expect([body.solar_wind_speed_kms, body.bz_nt, body.bt_nt]).toEqual([512, -4, 6]);
     expect(body.kp_forecast[0].time_tag).toBe("2026-10-30T00:00:00.000Z");
+    expect(body.cloud_cover_pct).toBe(80);
+    expect(body.cloud_provider).toBe("Ilmatieteen laitos");
+    expect(body.aurora_chance_geomagnetic).toBe("Erittäin hyvä");
+    expect(body.aurora_chance).toBe("Mahdollinen");
+    expect(body.clearest_hour).toEqual({ time_tag: "2026-10-29T11:00:00.000Z", cloud_cover: 20 });
   });
+
+  it("käyttää Open-Meteoa, kun FMI:llä ei ole dataa", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("https://opendata.fmi.fi/")) return new Response("<ExceptionReport/>", { status: 400 });
+        if (url.startsWith("https://api.open-meteo.com/")) {
+          return Response.json({
+            current: { cloud_cover: 50 },
+            hourly: { time: ["2026-10-29T10:00", "2026-10-29T11:00"], cloud_cover: [50, 10] },
+          });
+        }
+        if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
+        return Response.json([]);
+      }),
+    );
+    const r = await get("/api/spaceweather?lat=70&lon=-40");
+    expect(r.status).toBe(200);
+    const body = await r.json<any>();
+    expect(body.cloud_cover_pct).toBe(50);
+    expect(body.cloud_provider).toBe("Open-Meteo");
+    expect(body.aurora_chance).toBe("Hyvä");
+    expect(body.clearest_hour).toEqual({ time_tag: "2026-10-29T11:00:00.000Z", cloud_cover: 10 });
+  });
+  it("antaa Kp-arvion, vaikka kumpikaan pilvisyyslähde ei vastaa", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("https://opendata.fmi.fi/")) return new Response("<ExceptionReport/>", { status: 400 });
+        if (url.startsWith("https://api.open-meteo.com/")) return new Response("", { status: 500 });
+        if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
+        return Response.json([]);
+      }),
+    );
+    const r = await get("/api/spaceweather?lat=70&lon=-45");
+    expect(r.status).toBe(200);
+    const body = await r.json<any>();
+    expect(body.cloud_cover_pct).toBeNull();
+    expect(body.cloud_provider).toBeNull();
+    expect(body.aurora_chance).toBe(body.aurora_chance_geomagnetic);
+  });
+
 
   it("tuntematon reitti on 404", async () => {
     expect((await get("/api/nope")).status).toBe(404);

@@ -1,4 +1,4 @@
-const state = {lat:65.0121, lon:25.4651, offset:0};
+const state = {lat:65.0121, lon:25.4651, accuracy:null, offset:0};
 const el = id => document.getElementById(id);
 const API = (window.OMAVARUUS_API || "").replace(/\/$/, "");
 const fmt = d => d ? new Date(d).toLocaleString('fi-FI') : 'Aika tarkentuu';
@@ -10,9 +10,14 @@ async function json(path) {
 }
 async function weather() {
   try {
-    const w = await json(`/api/spaceweather?lat=${state.lat}`);
+    const w = await json(`/api/spaceweather?lat=${state.lat}&lon=${state.lon}`);
     el('kp').textContent=w.kp_now.toFixed(1); el('g-label').textContent=w.g_label;
     el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}`;
+    const hhmm=d=>new Date(d).toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
+    el('clouds').textContent=w.cloud_cover_pct==null
+      ? 'Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin'
+      : `Pilvisyys ${state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %, ${w.cloud_provider}) · Kp yksin: ${w.aurora_chance_geomagnetic}`
+        + (w.clearest_hour?` · Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`:'');
     el('wind').textContent=`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s · Bz: ${w.bz_nt ?? '–'} nT`;
     el('alerts').replaceChildren(...w.alerts.map(t => {const li=document.createElement('li'); li.textContent=t; return li;}));
     const svg=el('kp-chart'); svg.replaceChildren(); const pts=w.kp_history;
@@ -65,5 +70,14 @@ function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); re
   el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
   try {const c=await json('/api/config'); state.lat=c.default_lat; state.lon=c.default_lon;} catch(e) {console.warn(e);}
   weather(); sky(); launches(); setInterval(weather,300000); setInterval(sky,60000);
-  if(navigator.geolocation) navigator.geolocation.getCurrentPosition(p=>{state.lat=p.coords.latitude; state.lon=p.coords.longitude; weather(); sky();},()=>{}, {timeout:4000});
+  if(navigator.geolocation) {
+    // Tarkka paikannus (GPS, jos saatavilla). Haetaan uudelleen vain, jos sijainti siirtyy yli 200 m.
+    const moved=(lat,lon)=>Math.hypot((lat-state.lat)*111320,(lon-state.lon)*111320*Math.cos(lat*Math.PI/180))>200;
+    navigator.geolocation.watchPosition(p=>{
+      const {latitude:lat, longitude:lon, accuracy}=p.coords, first=state.accuracy==null;
+      const refresh=first||moved(lat,lon);
+      state.accuracy=accuracy;
+      if(refresh) {state.lat=lat; state.lon=lon; weather(); sky();}
+    },e=>console.warn('Paikannus epäonnistui:',e.message), {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
+  }
 })();

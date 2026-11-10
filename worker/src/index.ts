@@ -33,6 +33,7 @@ function parseAt(raw: string | null): Date {
 
 async function route(url: URL, env: Env): Promise<unknown> {
   const lat = () => numberParam(url, "lat", Number(env.DEFAULT_LAT), -90, 90);
+  const lon = () => numberParam(url, "lon", Number(env.DEFAULT_LON), -180, 180);
   switch (url.pathname) {
     case "/api/health":
       return { status: "ok", time: new Date().toISOString() };
@@ -44,17 +45,16 @@ async function route(url: URL, env: Env): Promise<unknown> {
         launch_limit: Number(env.LAUNCH_LIMIT),
       };
     case "/api/spaceweather":
-      return getSpaceWeather(lat()).catch((exc) => {
+      return getSpaceWeather(lat(), lon()).catch((exc) => {
         const reason = exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : String(exc);
         throw new HttpError(503, `Avaruussään haku epäonnistui: ${reason}`);
       });
     case "/api/launches":
       return getLaunches();
     case "/api/sky": {
-      const lon = numberParam(url, "lon", Number(env.DEFAULT_LON), -180, 180);
       const at = parseAt(url.searchParams.get("at"));
       try {
-        return getSkyChart(lat(), lon, Number(env.DEFAULT_ELEVATION_M), at, env.DEFAULT_PLACE);
+        return getSkyChart(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, env.DEFAULT_PLACE);
       } catch (exc) {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
