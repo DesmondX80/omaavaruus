@@ -39,6 +39,7 @@ h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacin
 .g-label { font-weight: 600; }
 .aurora { color: var(--good); margin-top: 4px; }
 .muted { color: var(--muted); font-size: 13px; }
+#clouds, #wind { white-space: pre-line; line-height: 1.5; }
 #kp-chart { width: 100%; height: auto; margin-top: 10px; }
 .alerts { margin: 10px 0 0; padding-left: 18px; color: var(--warm); font-size: 12px; }
 .alerts li { margin-bottom: 4px; }

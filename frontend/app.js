@@ -14,11 +14,15 @@ async function weather() {
     el('kp').textContent=w.kp_now.toFixed(1); el('g-label').textContent=w.g_label;
     el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}`;
     const hhmm=d=>new Date(d).toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
-    el('clouds').textContent=w.cloud_cover_pct==null
-      ? 'Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin'
-      : `Pilvisyys ${state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %, ${w.cloud_provider}) · Kp yksin: ${w.aurora_chance_geomagnetic}`
-        + (w.clearest_hour?` · Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`:'');
-    el('wind').textContent=`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s · Bz: ${w.bz_nt ?? '–'} nT`;
+    el('clouds').textContent=(w.cloud_cover_pct==null
+      ? ['Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin', `Kp yksin: ${w.aurora_chance_geomagnetic}`]
+      : [
+          `Pilvisyys ${state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %)`,
+          `Lähde: ${w.cloud_provider}`,
+          `Kp yksin: ${w.aurora_chance_geomagnetic}`,
+          ...(w.clearest_hour?[`Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`]:[]),
+        ]).join('\n');
+    el('wind').textContent=`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s\nBz: ${w.bz_nt ?? '–'} nT`;
     el('alerts').replaceChildren(...w.alerts.map(t => {const li=document.createElement('li'); li.textContent=t; return li;}));
     const svg=el('kp-chart'); svg.replaceChildren(); const pts=w.kp_history;
     if(pts.length) {
