@@ -8,21 +8,60 @@ async function json(path) {
   if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
   return body;
 }
+const INFO = {
+  kp: ['Kp-indeksi', 'Kp kuvaa maapallon magneettikentän häiriöisyyttä asteikolla 0–9. Mitä suurempi luku, sitä voimakkaampi geomagneettinen myrsky ja sitä etelämpänä revontulia voi nähdä. Lapissa revontulia voi näkyä jo Kp 1–2:lla, Etelä-Suomessa tarvitaan yleensä vähintään Kp 4–5. Arvo on NOAA:n laskema kolmen tunnin arvo, ja käyrä näyttää viimeiset 72 tuntia.'],
+  g: ['G-asteikko', 'NOAA:n asteikko geomagneettisten myrskyjen voimakkuudelle. G1 (heikko) vastaa Kp 5:tä, G2 Kp 6:ta, G3 Kp 7:ää, G4 Kp 8:aa ja G5 (äärimmäinen) Kp 9:ää. Alle Kp 5 on rauhallista.'],
+  kpOnly: ['Kp yksin', 'Revontuliarvio pelkän Kp-indeksin ja leveysasteen perusteella, ennen kuin pilvisyys otetaan huomioon. Kertoo, kannattaisiko revontulia odottaa selkeällä säällä.'],
+  clouds: ['Pilvisyys', 'Kokonaispilvisyys prosentteina: 0 % on täysin selkeää ja 100 % täysin pilvistä. ± kertoo, kuinka tarkasti laitteesi paikansi sijaintisi metreinä. Pilvisyys yli 30 % heikentää revontuliarviota ja yli 90 % estää näkyvyyden.'],
+  wind: ['Aurinkotuuli', 'Auringosta virtaavien sähköisesti varattujen hiukkasten nopeus kilometreinä sekunnissa (km/s). Tavallisesti noin 300–500 km/s. Yli 500–600 km/s tehostaa revontulia, varsinkin jos Bz on negatiivinen.'],
+  bz: ['Bz', 'Aurinkotuulen mukana kulkevan magneettikentän pohjois–eteläsuuntainen komponentti. Kun Bz on negatiivinen (etelään päin), energiaa pääsee helpommin maapallon magneettikenttään ja revontulien todennäköisyys kasvaa. Yksikkö nT on nanotesla, magneettikentän voimakkuuden yksikkö.'],
+  sky: ['Asteet', 'Kohteen perässä oleva luku on sen korkeus horisontin yläpuolella asteina: 0° on horisontissa ja 90° suoraan yläpuolella. Listassa näkyvät horisontin yläpuolella olevat Aurinko, Kuu ja planeetat.'],
+  launch: ['T− ja LIVE', 'T− tarkoittaa aikaa laukaisuun (T = laukaisuhetki), esimerkiksi T−2 h 5 min. Laukaisuajat tarkentuvat usein viime hetkillä. PÄIVITTYVÄ-merkki kertoo, että lista päivittyy automaattisesti.'],
+};
+function infoBtn(key) {
+  const b=document.createElement('button');
+  b.type='button'; b.className='info-btn'; b.dataset.info=key; b.textContent='i';
+  b.setAttribute('aria-label',`Mitä ${INFO[key][0]} tarkoittaa?`); b.setAttribute('aria-expanded','false');
+  return b;
+}
+function line(...parts) {
+  const d=document.createElement('div'); d.className='info-host';
+  parts.forEach((p,i)=>{if(i) d.append(' '); d.append(p);});
+  return d;
+}
+// Selitys avautuu sen rivin alle, jolla painike on; toinen painallus sulkee sen.
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.info-btn'); if(!b) return;
+  const host=b.closest('.info-host'), open=host.nextElementSibling?.classList.contains('info-text')&&host.nextElementSibling.dataset.info===b.dataset.info;
+  if(host.nextElementSibling?.classList.contains('info-text')) host.nextElementSibling.remove();
+  host.querySelectorAll('.info-btn').forEach(x=>x.setAttribute('aria-expanded','false'));
+  if(open) return;
+  const [title,text]=INFO[b.dataset.info], box=document.createElement('div');
+  box.className='info-text'; box.dataset.info=b.dataset.info; box.setAttribute('role','note');
+  const t=document.createElement('b'); t.textContent=title; box.append(t,' ',text);
+  host.after(box); b.setAttribute('aria-expanded','true');
+});
 async function weather() {
   try {
     const w = await json(`/api/spaceweather?lat=${state.lat}&lon=${state.lon}`);
-    el('kp').textContent=w.kp_now.toFixed(1); el('g-label').textContent=w.g_label;
+    el('kp').textContent=w.kp_now.toFixed(1);
+    el('g-label').replaceChildren(w.g_label, ' ', infoBtn('g'));
     el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}`;
     const hhmm=d=>new Date(d).toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
-    el('clouds').textContent=(w.cloud_cover_pct==null
-      ? ['Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin', `Kp yksin: ${w.aurora_chance_geomagnetic}`]
+    const where=state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`;
+    el('clouds').replaceChildren(...(w.cloud_cover_pct==null
+      ? [line('Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin')]
       : [
-          `Pilvisyys ${state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %)`,
-          `Lähde: ${w.cloud_provider}`,
-          `Kp yksin: ${w.aurora_chance_geomagnetic}`,
-          ...(w.clearest_hour?[`Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`]:[]),
-        ]).join('\n');
-    el('wind').textContent=`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s\nBz: ${w.bz_nt ?? '–'} nT`;
+          line(`Pilvisyys ${where}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %)`, infoBtn('clouds')),
+          line(`Lähde: ${w.cloud_provider}`),
+        ]),
+      line(`Kp yksin: ${w.aurora_chance_geomagnetic}`, infoBtn('kpOnly')),
+      ...(w.clearest_hour?[line(`Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`)]:[]),
+    );
+    el('wind').replaceChildren(
+      line(`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s`, infoBtn('wind')),
+      line(`Bz: ${w.bz_nt ?? '–'} nT`, infoBtn('bz')),
+    );
     el('alerts').replaceChildren(...w.alerts.map(t => {const li=document.createElement('li'); li.textContent=t; return li;}));
     const svg=el('kp-chart'); svg.replaceChildren(); const pts=w.kp_history;
     if(pts.length) {
@@ -70,7 +109,8 @@ async function launches() {
 }
 function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); render();}
 (async()=>{
-  document.querySelector('.live').textContent='PÄIVITTYVÄ'; clock(); setInterval(clock,1000);
+  document.querySelector('.live').textContent='PÄIVITTYVÄ';
+  document.querySelectorAll('[data-info-slot]').forEach(n=>n.append(infoBtn(n.dataset.infoSlot))); clock(); setInterval(clock,1000);
   el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
   try {const c=await json('/api/config'); state.lat=c.default_lat; state.lon=c.default_lon;} catch(e) {console.warn(e);}
   weather(); sky(); launches(); setInterval(weather,300000); setInterval(sky,60000);

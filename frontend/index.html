@@ -16,8 +16,8 @@
   <main>
     <section class="card" id="weather">
       <h2>Avaruussää</h2>
-      <div class="kp-row">
-        <div class="kp-badge"><span id="kp">–</span><small>Kp nyt</small></div>
+      <div class="kp-row info-host">
+        <div class="kp-badge"><span id="kp">–</span><small data-info-slot="kp">Kp nyt</small></div>
         <div>
           <div id="g-label" class="g-label">Ladataan…</div>
           <div id="aurora" class="aurora">Revontulimahdollisuus: –</div>
@@ -30,7 +30,7 @@
     </section>
 
     <section class="card" id="sky">
-      <h2>Taivaankartta</h2>
+      <h2 class="info-host" data-info-slot="sky">Taivaankartta</h2>
       <div class="sky-controls">
         <label>Aika <input type="range" id="time-offset" min="-720" max="720" step="10" value="0" /></label>
         <span id="time-label" class="muted"></span>
@@ -41,7 +41,7 @@
     </section>
 
     <section class="card" id="launches">
-      <h2>Laukaisut <span class="live">LIVE</span></h2>
+      <h2 class="info-host" data-info-slot="launch">Laukaisut <span class="live">LIVE</span></h2>
       <div id="next-launch" class="next-launch">Ladataan…</div>
       <ol id="launch-list" class="launch-list"></ol>
     </section>

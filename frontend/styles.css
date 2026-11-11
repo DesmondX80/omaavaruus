@@ -30,16 +30,32 @@ main {
   border-radius: 14px; padding: 16px;
 }
 h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); }
-.kp-row { display: flex; gap: 16px; align-items: center; }
+.kp-row { display: flex; gap: 16px; align-items: flex-start; }
 .kp-badge {
   display: grid; place-items: center; width: 82px; height: 82px; border-radius: 50%;
-  border: 2px solid var(--accent); font-size: 30px; font-weight: 600;
+  border: 2px solid var(--accent); font-size: 30px; font-weight: 600; flex: none;
 }
-.kp-badge small { font-size: 10px; color: var(--muted); font-weight: 400; }
+.kp-badge small { font-size: 10px; color: var(--muted); font-weight: 400; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.kp-badge .info-btn { width: 16px; height: 16px; font-size: 10px; }
 .g-label { font-weight: 600; }
 .aurora { color: var(--good); margin-top: 4px; }
 .muted { color: var(--muted); font-size: 13px; }
-#clouds, #wind { white-space: pre-line; line-height: 1.5; }
+#clouds, #wind { line-height: 1.5; }
+.info-btn {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-left: 2px;
+  border: 1px solid var(--muted); border-radius: 50%; background: transparent; color: var(--muted);
+  font: italic 600 11px/1 Georgia, serif; text-transform: none; letter-spacing: 0;
+  cursor: pointer; vertical-align: middle;
+}
+.info-btn:hover, .info-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+h2 .info-btn { margin-left: 6px; }
+.info-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.info-text {
+  margin: 6px 0 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 6px;
+  background: #121a2e; color: var(--fg); font-size: 13px; line-height: 1.5;
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+}
+.info-text b { color: var(--accent); }
 #kp-chart { width: 100%; height: auto; margin-top: 10px; }
 .alerts { margin: 10px 0 0; padding-left: 18px; color: var(--warm); font-size: 12px; }
 .alerts li { margin-bottom: 4px; }
