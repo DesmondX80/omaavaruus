@@ -29,6 +29,10 @@ jobs:
           test -n "$OMAVARUUS_API" || { echo "::error::Aseta repon muuttuja OMAVARUUS_API (Worker-osoite)"; exit 1; }
           cp -r frontend _site
           printf 'window.OMAVARUUS_API = %s;\n' "$(jq -Rn --arg v "$OMAVARUUS_API" '$v')" > _site/config.js
+          # Versio tiedostojen osoitteisiin, jotta selain ei yhdistä uutta HTML:ää vanhaan JS:ään/CSS:ään
+          v="${GITHUB_SHA::7}"
+          sed -i -E "s/(src|href)=\"(config\.js|sky\.js|app\.js|styles\.css)\"/\1=\"\2?v=$v\"/g" _site/index.html
+          grep -c "?v=$v" _site/index.html | grep -qx 4 || { echo "::error::Versioparametrien lisäys index.html:ään epäonnistui"; exit 1; }
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

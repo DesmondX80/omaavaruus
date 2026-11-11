@@ -32,8 +32,8 @@ main {
 h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); }
 .kp-row { display: flex; gap: 16px; align-items: flex-start; }
 .kp-badge {
-  display: grid; place-items: center; width: 82px; height: 82px; border-radius: 50%;
-  border: 2px solid var(--accent); font-size: 30px; font-weight: 600; flex: none;
+  display: grid; place-items: center; min-width: 72px; line-height: 1.1;
+  color: var(--accent); font-size: 34px; font-weight: 600; flex: none;
 }
 .kp-badge small { font-size: 10px; color: var(--muted); font-weight: 400; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
 .kp-badge .info-btn { width: 16px; height: 16px; font-size: 10px; }
