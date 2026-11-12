@@ -24,6 +24,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 - **Revontuliarvio**: Kp ja leveysaste, josta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja ~55 kirkkainta tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). Aikaslider ±12 h.
+- **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
 - **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta.
 
 ## Rakenne
@@ -38,8 +39,15 @@ worker/
     geocode.ts       # paikannimihaku (Open-Meteo Geocoding)
     launches.ts      # RocketLaunch.Live + uudelleenyrityksen odotus
     sky.ts           # astronomy-engine + kirkkaat tähdet (stars.ts)
-  test/              # vitest
-frontend/            # index.html, styles.css, app.js, sky.js, config.js (API-osoite)
+  test/              # vitest: API sekä frontendin tiedostolistojen ja tuontien tarkistus
+frontend/
+  index.html, styles.css, config.js (API-osoite)
+  manifest.webmanifest, icons/   # PWA-manifesti ja kuvakkeet (icon.svg on lähde, PNG:t siitä piirrettyjä)
+  sw.js              # service worker: verkko ensin, ilman verkkoa välimuisti
+  js/                # ES-moduulit ilman käännösvaihetta
+    main.js          # käynnistys ja ajastukset
+    core.js          # jaettu tila, API-kutsut, apufunktiot
+    weather.js, sky.js, skychart.js, places.js, launches.js, info.js
 ```
 
 ## Julkaisu
@@ -48,8 +56,9 @@ Push `main`-haaraan julkaisee muutokset automaattisesti:
 
 - `worker.yml` ajaa testit ja julkaisee Workerin (secretit `CLOUDFLARE_API_TOKEN`,
   `CLOUDFLARE_ACCOUNT_ID`; token pohjalla *Edit Cloudflare Workers*).
-- `pages.yml` julkaisee `frontend/`-hakemiston GitHub Pagesiin ja kirjoittaa repon
-  muuttujan `OMAVARUUS_API` (Workerin osoite) `config.js`:ään.
+- `pages.yml` julkaisee `frontend/`-hakemiston GitHub Pagesiin, kirjoittaa repon
+  muuttujan `OMAVARUUS_API` (Workerin osoite) `config.js`:ään ja asettaa commitin
+  tunnisteen service workerin versioksi (`sw.js`).
 
 Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 `worker/wrangler.toml`:n `CORS_ORIGINS`-muuttujassa.

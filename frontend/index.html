@@ -4,6 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OmaAvaruus</title>
+  <meta name="description" content="Avaruussää, revontuliennuste, taivaankartta ja rakettilaukaisut." />
+  <meta name="theme-color" content="#05070f" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,6 +16,7 @@
     <h1>OmaAvaruus</h1>
     <p class="sub">Avaruussää · taivaankartta · laukaisut</p>
     <div id="clock" class="clock"></div>
+    <div id="offline" class="offline" role="status" hidden></div>
     <div class="place">
       <span id="place-name" class="place-name"></span>
       <button type="button" id="place-toggle" class="link-btn" aria-expanded="false" aria-controls="place-panel">Vaihda paikka</button>
@@ -60,14 +66,13 @@
     </section>
 
     <section class="card" id="launches">
-      <h2 class="info-host" data-info-slot="launch">Laukaisut <span class="live">LIVE</span></h2>
+      <h2 class="info-host" data-info-slot="launch">Laukaisut <span class="live">PÄIVITTYVÄ</span></h2>
       <div id="next-launch" class="next-launch">Ladataan…</div>
       <ol id="launch-list" class="launch-list"></ol>
     </section>
   </main>
 
   <script src="config.js"></script>
-  <script src="sky.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@ function svgEl(name, attrs) {
   return el;
 }
 
-function drawSky(svg, chart) {
+export function drawSky(svg, chart) {
   svg.innerHTML = "";
   svg.appendChild(svgEl("circle", { cx: CX, cy: CY, r: R, fill: "#060a15", stroke: "#2a3858" }));
 
@@ -54,5 +54,3 @@ function drawSky(svg, chart) {
   info.textContent = `Aurinko ${chart.sun_alt.toFixed(0)}° · ${chart.is_dark ? "pimeää" : "valoisaa"} · ${chart.moon_phase_name}`;
   svg.appendChild(info);
 }
-
-window.drawSky = drawSky;

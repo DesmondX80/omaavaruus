@@ -19,6 +19,7 @@ body {
 header { padding: 24px 20px 8px; max-width: 1200px; margin: 0 auto; }
 h1 { margin: 0; font-size: 26px; letter-spacing: .5px; }
 .sub { margin: 2px 0 0; color: var(--muted); }
+.offline { margin-top: 8px; padding: 6px 10px; max-width: 420px; border-left: 3px solid var(--warm); border-radius: 6px; background: #1f1a10; color: var(--warm); font-size: 13px; }
 .place { margin-top: 6px; font-size: 14px; }
 .place-name { color: var(--fg); margin-right: 8px; }
 .link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
