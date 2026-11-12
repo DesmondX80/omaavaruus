@@ -11,6 +11,7 @@ run_worker_first = ["/api/*"]
 # Revontuli-ilmoitusten tilaukset ja VAPID-avain
 [[kv_namespaces]]
 binding = "SUBSCRIPTIONS"
+id = "03820680365e4b1387739896cc69be27"
 
 # Ilmoitusten tarkistus 15 minuutin välein
 [triggers]
