@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,12 @@ describe("frontend", () => {
     const list = read("sw.js").match(/const SHELL = \[([\s\S]*?)\];/)[1];
     const shell = [...list.matchAll(/"([^"]+)"/g)].map((m) => (m[1] === "./" ? "index.html" : m[1]));
     expect(shell.sort()).toEqual(files.filter((f) => f !== "sw.js").sort());
+  });
+
+  it("JavaScript-tiedostot ovat syntaksiltaan kelvollisia", () => {
+    for (const file of files.filter((f) => f.endsWith(".js"))) {
+      expect(() => execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" }), file).not.toThrow();
+    }
   });
 
   it("moduulien tuonnit osoittavat olemassa oleviin tiedostoihin", () => {

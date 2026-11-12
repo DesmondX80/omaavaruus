@@ -79,7 +79,7 @@ h2 .info-btn { margin-left: 6px; }
 .hourly h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .best-window { color: var(--good); font-weight: 600; margin-bottom: 8px; }
 .best-window.none { color: var(--muted); font-weight: 400; }
-.hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin-bottom: 6px; }
+.hours { touch-action: pan-y; user-select: none; -webkit-user-select: none; display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin-bottom: 6px; }
 .hour { display: grid; gap: 3px; padding: 0; border: 0; background: none; cursor: pointer; min-width: 0; }
 .hour i { display: block; height: 30px; border-radius: 3px; border: 1px solid transparent; background: var(--line); }
 .hour.l1 i { background: color-mix(in srgb, var(--good) 35%, var(--line)); }

@@ -14,7 +14,22 @@ function hourDetail(h) {
     h.limits.length?`rajoittaa: ${h.limits.join(', ')}`:null,
   ].filter(Boolean).join(' · ');
 }
+// Tuntipalkin tunnit ja valinta. Tunnin voi valita liu'uttamalla sormea tai hiirtä palkilla, napauttamalla tai näppäimistöllä.
+let hours=[];
+function selectHour(i) {
+  const h=hours[i]; if(!h||h.time_tag===state.hour) return;
+  state.hour=h.time_tag; el('hour-detail').textContent=hourDetail(h);
+  [...el('hours').children].forEach((x,n)=>x.setAttribute('aria-pressed',String(n===i)));
+}
+function hourAt(e) {
+  const r=el('hours').getBoundingClientRect();
+  return Math.min(hours.length-1,Math.max(0,Math.floor((e.clientX-r.left)/r.width*hours.length)));
+}
+// Kosketus siepataan palkille, jotta liu'utus jatkuu, vaikka sormi valuisi palkin ylä- tai alapuolelle.
+el('hours').addEventListener('pointerdown',e=>{el('hours').setPointerCapture(e.pointerId); selectHour(hourAt(e));});
+el('hours').addEventListener('pointermove',e=>selectHour(hourAt(e)));
 function hourly(w) {
+  hours=w.hourly;
   el('hourly').hidden=!w.hourly.length;
   const b=w.best_window;
   el('best-window').textContent=b
@@ -30,12 +45,10 @@ function hourly(w) {
     btn.setAttribute('aria-label',hourDetail(h)); btn.setAttribute('aria-pressed',String(h===selected));
     label.textContent=hour%3===0?String(hour).padStart(2,'0'):'';
     btn.append(bar,label);
-    btn.addEventListener('click',()=>{
-      state.hour=h.time_tag; el('hour-detail').textContent=hourDetail(h);
-      el('hours').querySelectorAll('.hour').forEach(x=>x.setAttribute('aria-pressed',String(x===btn)));
-    });
     return btn;
   }));
+  // Näppäimistö: Enter tai välilyönti kohdistetulla tunnilla tuottaa click-tapahtuman.
+  [...el('hours').children].forEach((btn,i)=>btn.addEventListener('click',()=>selectHour(i)));
 }
 export async function weather() {
   try {
