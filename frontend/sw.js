@@ -23,6 +23,7 @@ const SHELL = [
   "js/push.js",
   "js/sky.js",
   "js/skychart.js",
+  "js/skyview.js",
   "js/solarwind.js",
   "js/weather.js",
   "icons/icon.svg",

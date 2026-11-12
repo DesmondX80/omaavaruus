@@ -91,8 +91,24 @@
       <div class="sky-controls">
         <label>Aika <input type="range" id="time-offset" min="-720" max="720" step="10" value="0" /></label>
         <span id="time-label" class="muted"></span>
+        <button type="button" id="sky-full" class="sky-btn" aria-label="Avaa taivaankartta koko näytölle"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Koko näyttö</button>
+        <button type="button" id="sky-close" class="sky-btn" aria-label="Sulje koko näytön tila">✕</button>
       </div>
-      <svg id="sky-chart" viewBox="0 0 400 420" role="img" aria-label="Taivaankartta"></svg>
+      <div id="sky-toolbar" class="sky-toolbar" hidden>
+        <div class="sky-modes" role="group" aria-label="Näkymä">
+          <button type="button" class="sky-btn" data-mode="map" aria-pressed="true">Kartta</button>
+          <button type="button" class="sky-btn" data-mode="view" aria-pressed="false">Näkymä</button>
+          <button type="button" class="sky-btn" data-mode="sensors" aria-pressed="false">Osoita taivaalle</button>
+        </div>
+        <button type="button" id="sky-camera" class="sky-btn" aria-pressed="false" hidden>Kamera</button>
+        <div id="sky-status" class="muted" role="status"></div>
+        <div id="sky-heading" class="muted" hidden></div>
+      </div>
+      <div id="sky-stage" class="sky-stage">
+        <video id="sky-video" class="sky-video" playsinline muted hidden></video>
+        <canvas id="sky-view" class="sky-view" hidden aria-label="Taivas valittuun suuntaan"></canvas>
+        <svg id="sky-chart" viewBox="0 0 400 420" role="img" aria-label="Taivaankartta"></svg>
+      </div>
       <div id="sky-detail" class="sky-detail" aria-live="polite" hidden></div>
       <div id="sky-meta" class="muted"></div>
       <div id="object-list" class="objects"></div>

@@ -42,3 +42,29 @@ describe("frontend", () => {
     for (const ref of [...refs, ...icons]) expect(files, ref).toContain(ref);
   });
 });
+
+describe("taivaan perspektiivinäkymä", async () => {
+  const { altAz, camera, orientationView, project, vector } = await import("../../frontend/js/skyview.js");
+  const dir = (...angles) => altAz(orientationView(...angles).dir);
+
+  it("laskee katselusuunnan puhelimen asennosta", () => {
+    // Pystyssä, takakamera pohjoiseen: horisontissa pohjoisessa.
+    expect(dir(0, 90, 0)).toMatchObject({ alt: expect.closeTo(0, 5), az: expect.closeTo(0, 5) });
+    // Alpha kasvaa vastapäivään: 90° on länsi.
+    expect(dir(90, 90, 0).az).toBeCloseTo(270, 5);
+    // Yläreunaa kallistettu taaksepäin: kamera osoittaa 45° ylös.
+    expect(dir(0, 135, 0).alt).toBeCloseTo(45, 5);
+    // Vaakatasossa näyttö ylöspäin: kamera osoittaa maahan.
+    expect(dir(0, 0, 0).alt).toBeCloseTo(-90, 5);
+  });
+
+  it("projisoi taivaan näytölle oikein päin", () => {
+    const south = camera(vector(0, 180), [0, 0, 1], 60);
+    expect(project(south, vector(0, 180), 400, 800)).toEqual([200, 400]);
+    // Etelään katsottaessa länsi on oikealla ja ylempänä oleva kohde näytön yläosassa.
+    const [x, y] = project(south, vector(10, 190), 400, 800);
+    expect(x).toBeGreaterThan(200);
+    expect(y).toBeLessThan(400);
+    expect(project(south, vector(0, 0), 400, 800)).toBeNull();
+  });
+});

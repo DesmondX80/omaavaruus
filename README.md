@@ -24,7 +24,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 - **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Revontuliovaali ja aurinkotuuli**: OVATION-mallin ennuste napakarttana (mantereiden ääriviivat Natural Earth 110m) ja aurinkotuulen nopeus, tiheys ja Bz vuorokauden ajalta (NOAA SWPC:n reaaliaikamittaukset, DSCOVR/ACE/IMAP).
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
-- **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h.
+- **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h. Koko näytön tilassa on lisäksi perspektiivinäkymä, jota käännetään sormella tai puhelimen asentoantureilla (DeviceOrientation), ja taustalle voi ottaa takakameran kuvan.
 - **ISS-ylilennot**: aseman sijainti ja näkyvät ylilennot viideksi vuorokaudeksi valitulle paikalle (CelesTrakin ratatiedot, SGP4 [satellite.js](https://github.com/shashwatak/satellite-js):llä). Näkyvyys vaatii, että asema on auringonvalossa ja taivas hämärä. Asema näkyy myös taivaankartalla, ja näkyvästä ylilennosta voi saada push-ilmoituksen.
 - **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
@@ -58,7 +58,7 @@ frontend/
   js/                # ES-moduulit ilman käännösvaihetta
     main.js          # käynnistys ja ajastukset
     core.js          # jaettu tila, API-kutsut, apufunktiot
-    weather.js, solarwind.js, land.js, sky.js, skychart.js, iss.js, events.js, places.js, push.js, launches.js, info.js
+    weather.js, solarwind.js, land.js, sky.js, skychart.js, skyview.js, iss.js, events.js, places.js, push.js, launches.js, info.js
 ```
 
 ## Julkaisu
