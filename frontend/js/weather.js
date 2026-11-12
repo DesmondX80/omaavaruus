@@ -7,7 +7,7 @@ const moonText=h=>`Kuu ${Math.round(h.moon_illumination*100)} % valaistu, ${h.mo
 function hourDetail(h) {
   return [
     `Klo ${hhmm(h.time_tag)}: ${h.chance ?? 'ei Kp-ennustetta'}`,
-    h.kp==null?null:`Kp ${num(h.kp,1)}`,
+    h.model==='OVATION'?'OVATION-malli':h.kp==null?null:`Kp ${num(h.kp,1)}`,
     h.cloud_cover==null?'pilvisyys ei tiedossa':`pilvisyys ${Math.round(h.cloud_cover)} %`,
     `${h.light.toLowerCase()} (Aurinko ${num(h.sun_alt)}°)`,
     moonText(h).replace('Kuu','kuu'),
@@ -63,7 +63,10 @@ export async function weather() {
           line(`Pilvisyys ${where}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %)`, infoBtn('clouds')),
           line(`Lähde: ${w.cloud_provider}`),
         ]),
-      line(`Kp yksin: ${w.aurora_chance_geomagnetic}`, infoBtn('kpOnly')),
+      ...(w.ovation
+        ? [line(`OVATION-malli: ${w.aurora_chance_geomagnetic} (yläpuolella ${w.ovation.probability} %, lähistöllä ${w.ovation.nearby} %)`, infoBtn('ovation'))]
+        : []),
+      line(`Kp yksin: ${w.aurora_chance_kp}`, infoBtn('kpOnly')),
       line(`Valoisuus: ${w.light} (Aurinko ${num(w.sun_alt)}°)`, infoBtn('light')),
       line(moonText(w)),
     );

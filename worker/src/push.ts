@@ -148,6 +148,7 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
       const level = CHANCE_LEVELS.indexOf(weather.aurora_chance);
       if (!shouldNotify(sub, level, now.getTime())) continue;
       const details = [
+        ...(weather.ovation ? [`OVATION ${weather.ovation.probability} % (lähistöllä ${weather.ovation.nearby} %)`] : []),
         `Kp ${weather.kp_now.toLocaleString("fi-FI", { maximumFractionDigits: 1 })}`,
         ...(weather.cloud_cover_pct === null ? [] : [`pilvisyys ${Math.round(weather.cloud_cover_pct)} %`]),
       ];

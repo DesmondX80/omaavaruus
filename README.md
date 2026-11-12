@@ -21,7 +21,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 ## Ominaisuudet
 
 - **Avaruussää**: Kp-indeksi (NOAA SWPC), G-asteikko, aurinkotuulen nopeus, Bz ja hälytykset.
-- **Revontuliarvio**: Kp ja leveysaste, josta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
+- **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja ~55 kirkkainta tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). Aikaslider ±12 h.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
@@ -36,7 +36,8 @@ worker/
   src/
     index.ts         # reititys, parametrien tarkistus, CORS
     http.ts          # TTL-välimuisti, fetch + SWPC-muodon normalisointi
-    spaceweather.ts  # NOAA SWPC
+    spaceweather.ts  # NOAA SWPC: Kp, aurinkotuuli ja revontuliarvio
+    ovation.ts       # OVATION Prime -revontulimalli (SWPC)
     geocode.ts       # paikannimihaku (Open-Meteo Geocoding)
     push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus
     webpush.ts       # push-viestin salaus (RFC 8291) ja VAPID-tunniste (RFC 8292)
@@ -77,7 +78,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | --- | --- |
 | `GET /api/health` | Terveystarkistus |
 | `GET /api/config` | Oletuskoordinaatit |
-| `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
+| `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, OVATION-todennäköisyys (`ovation`), revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
 | `GET /api/geocode?q=Rovaniemi` | Paikannimihaku, enintään 5 osumaa |
 | `GET /api/push/key` | Ilmoitusten julkinen VAPID-avain |
 | `POST /api/push/subscribe` | Tallentaa tai päivittää ilmoitustilauksen (`subscription`, `lat`, `lon`, `place`, `threshold`) |
@@ -89,6 +90,6 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 ## Seuraavat askeleet
 
 1. Kääri taivaankartta WebGL:ään (esim. three.js) ja lisää tähtikuvioiden viivat.
-2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit ja OVATION-revontulimalli Kp-heuristiikan tilalle.
+2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit (esim. aurinkotuulen tiheys ja käyrät) ja OVATION-kartta.
 3. Suodata laukaisut suosikkitoimijoittain ja ilmoita laukaisuista (web push on jo käytössä revontulille).
 4. Jaettu välimuisti Workers KV:llä, jos isolaattikohtainen välimuisti ei riitä.

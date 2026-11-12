@@ -11,6 +11,11 @@ export class HttpError extends Error {
 /** Isolaatin oma TTL-välimuisti; Worker-isolaatit elävät minuutteja, joten tämä riittää ulkoisten API:en suojaksi. */
 const store = new Map<string, { expires: number; value: Promise<unknown> }>();
 
+/** Tyhjentää välimuistin (testit). */
+export function clearCache(): void {
+  store.clear();
+}
+
 export function cached<T>(key: string, ttlS: number, factory: () => Promise<T>): Promise<T> {
   const hit = store.get(key);
   if (hit && hit.expires > Date.now()) return hit.value as Promise<T>;

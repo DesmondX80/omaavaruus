@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
 import { parsePlaces } from "../src/geocode";
-import { asRecords } from "../src/http";
+import { asRecords, clearCache } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { moonPhaseName, skyLight } from "../src/sky";
 import { memoryKv } from "./helpers";
+import { ovationAt, ovationLevel, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
 const env: Env = {
@@ -30,10 +31,22 @@ const fmiXml = (rows: [string, string, string][]) =>
     )
     .join("")}</wfs:FeatureCollection>`;
 
+/** OVATION-syöte, jossa annetuissa pisteissä on todennäköisyys ja muualla 0. */
+const ovationFeed = (points: [number, number, number][], forecast = "2026-11-09T00:10:00Z") => ({
+  "Observation Time": "2026-11-08T23:10:00Z",
+  "Forecast Time": forecast,
+  "Data Format": "[Longitude, Latitude, Aurora]",
+  coordinates: points,
+  type: "MultiPoint",
+});
+
 const get = (path: string, headers: Record<string, string> = {}) =>
   worker.fetch(new Request(`https://api.test${path}`, { headers }), env);
 
-beforeEach(() => resetLaunchState());
+beforeEach(() => {
+  resetLaunchState();
+  clearCache();
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -82,6 +95,20 @@ describe("apufunktiot", () => {
     const winterNight = skyLight(65, 25.5, new Date("2026-11-08T23:30:00Z"));
     expect(winterNight.sun_alt).toBeLessThan(-12);
     expect(winterNight.moon_illumination).toBeLessThan(0.1);
+  });
+
+  it("lukee OVATION-ruudukon paikalle ja lähistölle", () => {
+    // Oulu 65 N 25 E: kohdalla 6 %, 400 km pohjoisessa 40 %, 700 km pohjoisessa 90 % (liian kaukana).
+    const grid = parseOvation(ovationFeed([[25, 65, 6], [25, 69, 40], [25, 71, 90], [335, 65, 70]]));
+    expect(ovationAt(grid, 65.01, 25.47)).toMatchObject({ probability: 6, nearby: 40, forecast: "2026-11-09T00:10:00.000Z" });
+    // Pituusaste −25° on sama ruutu kuin 335°.
+    expect(ovationAt(grid, 65, -25).probability).toBe(70);
+    expect(() => parseOvation([])).toThrow();
+    expect(ovationLevel({ probability: 2, nearby: 4 })).toBe(0);
+    expect(ovationLevel({ probability: 6, nearby: 6 })).toBe(1);
+    // Lähistön revontulet näkyvät horisontissa: porrasta heikompi arvio kuin yläpuolella.
+    expect(ovationLevel({ probability: 6, nearby: 40 })).toBe(2);
+    expect(ovationLevel({ probability: 40, nearby: 40 })).toBe(3);
   });
 
   it("valitsee parhaan havaintoikkunan", () => {
@@ -219,6 +246,50 @@ describe("reitit", () => {
     expect(body.hourly[3]).toMatchObject({ kp: 4, cloud_cover: null, chance: "Hyvä" });
     expect(body.hourly[4].kp).toBeNull();
     expect(body.best_window).toEqual({ start: "2026-11-09T00:00:00.000Z", end: "2026-11-09T03:00:00.000Z", chance: "Hyvä" });
+  });
+
+  it("käyttää OVATION-mallia lähimmälle tunnille ja Kp-ennustetta sen jälkeen", async () => {
+    darkNight();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("ovation_aurora_latest.json")) return Response.json(ovationFeed([[20, 69, 40]]));
+        if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
+        if (url.endsWith("forecast.json")) return Response.json([["time_tag", "kp", "observed"], ["2026-11-09 00:00:00", "0", "predicted"]]);
+        if (url.startsWith("https://opendata.fmi.fi/")) return new Response(fmiXml([["2026-11-08T23:00:00Z", "TotalCloudCover", "0"]]));
+        return Response.json([]);
+      }),
+    );
+    const r = await get("/api/spaceweather?lat=68&lon=21");
+    const body = await r.json<any>();
+    expect(body.aurora_model).toBe("OVATION");
+    expect(body.ovation).toMatchObject({ probability: 0, nearby: 40 });
+    expect(body.aurora_chance_kp).toBe("Erittäin hyvä");
+    expect(body.aurora_chance_geomagnetic).toBe("Hyvä");
+    expect(body.aurora_chance).toBe("Hyvä");
+    expect(body.sources).toContain("https://services.swpc.noaa.gov/json/ovation_aurora_latest.json");
+    // Ennusteen hetki 00.10 kattaa tunnit 23 ja 00; klo 01 alkaen arvio tulee Kp-ennusteesta.
+    expect(body.hourly.slice(0, 3).map((h: any) => [h.model, h.chance_geomagnetic])).toEqual([
+      ["OVATION", "Hyvä"],
+      ["OVATION", "Hyvä"],
+      ["Kp", "Mahdollinen"],
+    ]);
+  });
+
+  it("ei käytä vanhentunutta OVATION-ennustetta", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-09T04:30:00Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("ovation_aurora_latest.json")) return Response.json(ovationFeed([[20, 69, 40]]));
+        if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
+        return Response.json([]);
+      }),
+    );
+    const body = await (await get("/api/spaceweather?lat=68&lon=21")).json<any>();
+    expect(body.aurora_model).toBe("Kp");
+    expect(body.ovation).toBeNull();
   });
 
   it("käyttää Open-Meteoa, kun FMI:llä ei ole dataa", async () => {

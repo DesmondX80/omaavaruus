@@ -1,5 +1,6 @@
 import { getCloudCover, type CloudCover } from "./clouds";
 import { asRecords, cached, fetchJson } from "./http";
+import { getOvation, OVATION_URL, ovationAt, ovationLevel, type OvationPoint } from "./ovation";
 import { skyLight, type SkyLight } from "./sky";
 
 const SWPC = "https://services.swpc.noaa.gov";
@@ -98,6 +99,8 @@ export interface HourPoint extends SkyLight {
   time_tag: string;
   /** null, jos Kp-ennuste ei kata tuntia; silloin arviokin puuttuu. */
   kp: number | null;
+  /** Geomagneettisen arvion lähde: OVATION-malli kattaa vain lähimmän tunnin, sen jälkeen Kp-ennuste. */
+  model: "OVATION" | "Kp" | null;
   cloud_cover: number | null;
   light: string;
   chance: string | null;
@@ -124,8 +127,24 @@ const HOUR_MS = 3_600_000;
 const HOURLY_COUNT = 24;
 const KP_BIN_MS = 3 * HOUR_MS;
 
-/** Tuntikohtainen arvio kuluvasta tunnista eteenpäin: Kp-ennuste (3 h jaksot), pilvisyysennuste ja valoisuus. */
-function hourlyOutlook(lat: number, lon: number, now: Date, kpRows: KpPoint[], clouds: CloudCover | null): HourPoint[] {
+/** OVATION-arvio, joka on voimassa ennusteen hetkeen asti. */
+interface OvationNow {
+  until: number;
+  chance: string;
+}
+
+/**
+ * Tuntikohtainen arvio kuluvasta tunnista eteenpäin: pilvisyysennuste, valoisuus ja geomagneettinen arvio.
+ * Ne tunnit, jotka alkavat ennen OVATION-ennusteen hetkeä, käyttävät mallia, myöhemmät Kp-ennustetta (3 h jaksot).
+ */
+function hourlyOutlook(
+  lat: number,
+  lon: number,
+  now: Date,
+  kpRows: KpPoint[],
+  clouds: CloudCover | null,
+  ovation: OvationNow | null,
+): HourPoint[] {
   const start = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS;
   const cloudAt = new Map(clouds?.forecast.map((p) => [Date.parse(p.time_tag), p.cloud_cover]));
   return Array.from({ length: HOURLY_COUNT }, (_, i) => {
@@ -137,11 +156,13 @@ function hourlyOutlook(lat: number, lon: number, now: Date, kpRows: KpPoint[], c
     const cloud = cloudAt.get(t) ?? null;
     // Kuluvan tunnin valoisuus lasketaan nykyhetkelle, tulevien tuntien tasatunnille.
     const light = skyLight(lat, lon, i === 0 ? now : new Date(t));
-    const geomagnetic = kp === null ? null : auroraChance(kp, lat);
+    const useOvation = ovation !== null && t <= ovation.until;
+    const geomagnetic = useOvation ? ovation.chance : kp === null ? null : auroraChance(kp, lat);
     const visibility = geomagnetic === null ? { chance: null, limits: [] } : visibleChance(geomagnetic, cloud, light);
     return {
       time_tag: new Date(t).toISOString(),
       kp,
+      model: useOvation ? "OVATION" : kp === null ? null : "Kp",
       cloud_cover: cloud,
       ...light,
       light: lightLabel(light.sun_alt),
@@ -228,22 +249,30 @@ function swpcData() {
 }
 
 export async function getSpaceWeather(lat: number, lon: number) {
-  // Pilvisyyden haun epäonnistuminen ei saa kaataa avaruussäätä: arvio tehdään silloin pelkästä Kp:stä.
-  const [{ history, forecast, speed, bz, bt, alertList }, clouds] = await Promise.all([
+  const now = new Date();
+  // Pilvisyyden tai OVATION-mallin haun epäonnistuminen ei saa kaataa avaruussäätä:
+  // arvio tehdään silloin Kp:stä ja ilman pilvisyyttä.
+  const [{ history, forecast, speed, bz, bt, alertList }, clouds, grid] = await Promise.all([
     swpcData(),
     getCloudCover(lat, lon).catch((exc): CloudCover | null => {
       console.warn(`Pilvisyyden haku epäonnistui: ${exc}`);
       return null;
     }),
+    getOvation(now).catch((exc) => {
+      console.warn(`OVATION-mallin haku epäonnistui: ${exc}`);
+      return null;
+    }),
   ]);
-  const now = new Date();
   const kpNow = history.at(-1)?.kp ?? 0;
   const g = kpToGScale(kpNow);
-  const geomagnetic = auroraChance(kpNow, lat);
+  const kpChance = auroraChance(kpNow, lat);
+  const ovation: OvationPoint | null = grid && ovationAt(grid, lat, lon);
+  const geomagnetic = ovation ? CHANCE_LEVELS[ovationLevel(ovation)] : kpChance;
   const cloudNow = clouds?.now ?? null;
   const light = skyLight(lat, lon, now);
   const visibility = visibleChance(geomagnetic, cloudNow, light);
-  const hourly = hourlyOutlook(lat, lon, now, forecast, clouds);
+  const ovationNow = ovation && { until: Date.parse(ovation.forecast), chance: geomagnetic };
+  const hourly = hourlyOutlook(lat, lon, now, forecast, clouds, ovationNow);
   return {
     updated: now.toISOString(),
     kp_now: kpNow,
@@ -256,6 +285,9 @@ export async function getSpaceWeather(lat: number, lon: number) {
     bt_nt: bt,
     aurora_chance: visibility.chance,
     aurora_chance_geomagnetic: geomagnetic,
+    aurora_chance_kp: kpChance,
+    aurora_model: ovation ? "OVATION" : "Kp",
+    ovation,
     aurora_limits: visibility.limits,
     ...light,
     light: lightLabel(light.sun_alt),
@@ -268,6 +300,7 @@ export async function getSpaceWeather(lat: number, lon: number) {
     sources: [
       `${SWPC}/products/noaa-planetary-k-index.json`,
       "https://www.swpc.noaa.gov/products/planetary-k-index",
+      ...(ovation ? [OVATION_URL] : []),
       ...(clouds ? [clouds.source] : []),
     ],
   };
