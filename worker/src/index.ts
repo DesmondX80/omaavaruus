@@ -1,3 +1,4 @@
+import { searchPlaces } from "./geocode";
 import { HttpError } from "./http";
 import { getLaunches } from "./launches";
 import { getSkyChart } from "./sky";
@@ -49,6 +50,15 @@ async function route(url: URL, env: Env): Promise<unknown> {
         const reason = exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : String(exc);
         throw new HttpError(503, `Avaruussään haku epäonnistui: ${reason}`);
       });
+    case "/api/geocode": {
+      const query = (url.searchParams.get("q") ?? "").trim();
+      if (query.length < 2 || query.length > 80) {
+        throw new HttpError(422, "Parametrin q pitää olla 2–80 merkkiä pitkä paikannimi.");
+      }
+      return searchPlaces(query).catch((exc) => {
+        throw new HttpError(503, `Paikkahaku epäonnistui: ${exc instanceof HttpError ? exc.detail : exc}`);
+      });
+    }
     case "/api/launches":
       return getLaunches();
     case "/api/sky": {

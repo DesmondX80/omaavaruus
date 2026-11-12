@@ -255,6 +255,34 @@ describe("reitit", () => {
   });
 
 
+  it("hakee paikkoja nimellä", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(new URL(url).searchParams.get("name")).toBe("Rovaniemi");
+        return Response.json({
+          results: [
+            { name: "Rovaniemi", latitude: 66.49897, longitude: 25.68867, country: "Suomi", admin1: "Lappi" },
+            { name: "Ilman koordinaatteja" },
+          ],
+        });
+      }),
+    );
+    const r = await get("/api/geocode?q=%20Rovaniemi%20");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({
+      results: [{ name: "Rovaniemi", region: "Lappi", country: "Suomi", lat: 66.49897, lon: 25.68867 }],
+    });
+  });
+
+  it("paikkahaku: tyhjä tulos, liian lyhyt haku ja lähteen virhe", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ generationtime_ms: 1 })));
+    expect(await (await get("/api/geocode?q=zzqqxx")).json()).toEqual({ results: [] });
+    expect((await get("/api/geocode?q=a")).status).toBe(422);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
+    expect((await get("/api/geocode?q=Oulu")).status).toBe(503);
+  });
+
   it("tuntematon reitti on 404", async () => {
     expect((await get("/api/nope")).status).toBe(404);
   });

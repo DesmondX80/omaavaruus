@@ -19,6 +19,22 @@ body {
 header { padding: 24px 20px 8px; max-width: 1200px; margin: 0 auto; }
 h1 { margin: 0; font-size: 26px; letter-spacing: .5px; }
 .sub { margin: 2px 0 0; color: var(--muted); }
+.place { margin-top: 6px; font-size: 14px; }
+.place-name { color: var(--fg); margin-right: 8px; }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.place-panel { margin-top: 10px; padding: 12px; max-width: 420px; background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; }
+.place-list { list-style: none; margin: 0; padding: 0; }
+.place-list li { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); }
+.place-list button { padding: 8px 4px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.place-list .pick { flex: 1; min-width: 0; }
+.place-list .pick small { color: var(--muted); }
+.place-list .pick[aria-current="true"] { color: var(--accent); font-weight: 600; }
+.place-list .remove { color: var(--muted); padding: 8px 10px; }
+.place-list button:hover { color: var(--accent); }
+.place-search { display: flex; gap: 8px; margin: 12px 0 6px; }
+.place-search input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+.place-search button { padding: 8px 14px; border: 1px solid var(--accent); border-radius: 8px; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.place button:focus-visible, .place input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .clock { color: var(--accent); font-variant-numeric: tabular-nums; margin-top: 6px; }
 main {
   display: grid; gap: 16px; padding: 16px 20px 40px;

@@ -1,4 +1,5 @@
-const state = {lat:65.0121, lon:25.4651, accuracy:null, offset:0, hour:null};
+// place: käyttäjän valitsema tallennettu paikka (null = oma sijainti); gps: viimeisin paikannus; fallback: API:n oletuspaikka.
+const state = {lat:65.0121, lon:25.4651, offset:0, hour:null, place:null, gps:null, places:[], fallback:{name:'Oulu', lat:65.0121, lon:25.4651}};
 const el = id => document.getElementById(id);
 const API = (window.OMAVARUUS_API || "").replace(/\/$/, "");
 const fmt = d => d ? new Date(d).toLocaleString('fi-FI') : 'Aika tarkentuu';
@@ -86,7 +87,7 @@ async function weather() {
     el('kp').textContent=w.kp_now.toFixed(1);
     el('g-label').replaceChildren(w.g_label, ' ', infoBtn('g'));
     el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}${w.aurora_limits.length?` – rajoittaa: ${w.aurora_limits.join(', ')}`:''}`;
-    const where=state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`;
+    const where=state.place?`paikassa ${state.place.name}`:state.gps?`sijainnissasi (±${Math.round(state.gps.accuracy)} m)`:'oletussijainnissa';
     el('clouds').replaceChildren(...(w.cloud_cover_pct==null
       ? [line('Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin')]
       : [
@@ -116,9 +117,73 @@ async function sky() {
     const at=new Date(Date.now()+state.offset*60000).toISOString();
     const c=await json(`/api/sky?lat=${state.lat}&lon=${state.lon}&at=${encodeURIComponent(at)}`);
     drawSky(el('sky-chart'),c); el('time-label').textContent=fmt(c.at);
-    el('sky-meta').textContent=`${state.lat.toFixed(2)}°, ${state.lon.toFixed(2)}° · ${c.moon_phase_name}`;
+    el('sky-meta').textContent=`${placeLabel()} · ${state.lat.toFixed(2)}°, ${state.lon.toFixed(2)}° · ${c.moon_phase_name}`;
     el('object-list').replaceChildren(...c.objects.filter(o=>o.alt>0&&o.kind!=='star').map(o=>{const s=document.createElement('span'); s.textContent=`${o.name} ${o.alt.toFixed(0)}°`; return s;}));
   } catch(e) {el('sky-meta').textContent=e.message;}
+}
+// Paikan valinta: oma sijainti (GPS) tai nimellä haettu paikka. Valinnat tallentuvat tämän selaimen localStorageen.
+const saved = {
+  get(key, fallback) {try {return JSON.parse(localStorage.getItem(key)) ?? fallback;} catch(e) {return fallback;}},
+  set(key, value) {try {localStorage.setItem(key, JSON.stringify(value));} catch(e) {console.warn('Tallennus epäonnistui');}},
+};
+const validPlace = p => p && typeof p.name==='string' && p.name && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat)<=90 && Math.abs(p.lon)<=180;
+const samePlace = (a,b) => a.name===b.name && Math.abs(a.lat-b.lat)<0.01 && Math.abs(a.lon-b.lon)<0.01;
+const placeLabel = () => state.place ? state.place.name : state.gps ? 'Oma sijainti' : `${state.fallback.name} (oletus)`;
+function button(className, text, onClick) {
+  const b=document.createElement('button'); b.type='button'; b.className=className; b.textContent=text;
+  b.addEventListener('click',onClick); return b;
+}
+function renderPlaces() {
+  el('place-name').textContent=`Paikka: ${placeLabel()}`;
+  const item = (label, current, onPick, onRemove) => {
+    const li=document.createElement('li'), pick=button('pick',label,onPick);
+    pick.setAttribute('aria-current',String(current)); li.append(pick);
+    if(onRemove) {const x=button('remove','✕',onRemove); x.setAttribute('aria-label',`Poista ${label}`); li.append(x);}
+    return li;
+  };
+  el('place-list').replaceChildren(
+    item(state.gps?'Oma sijainti':`Oma sijainti (paikannus ei käytössä: ${state.fallback.name})`, !state.place, ()=>selectPlace(null)),
+    ...state.places.map(p=>item(p.name, state.place===p, ()=>selectPlace(p), ()=>removePlace(p))),
+  );
+}
+// Asettaa havaintopaikan valinnan mukaan ja hakee paikasta riippuvat tiedot uudelleen.
+function applyPlace() {
+  const p=state.place ?? state.gps ?? state.fallback;
+  state.lat=p.lat; state.lon=p.lon; state.hour=null;
+  renderPlaces(); weather(); sky();
+}
+function selectPlace(place) {
+  state.place=place; saved.set('omaavaruus.selected', place?state.places.indexOf(place):null);
+  togglePanel(false); applyPlace();
+}
+function removePlace(place) {
+  const selected=state.place===place;
+  state.places=state.places.filter(p=>p!==place); saved.set('omaavaruus.places',state.places);
+  if(selected) selectPlace(null);
+  else {saved.set('omaavaruus.selected', state.place?state.places.indexOf(state.place):null); renderPlaces();}
+}
+function togglePanel(open) {
+  el('place-panel').hidden=!open; el('place-toggle').setAttribute('aria-expanded',String(open));
+  el('place-toggle').textContent=open?'Sulje':'Vaihda paikka';
+  if(open) el('place-query').focus(); else {el('place-results').replaceChildren(); el('place-status').textContent='';}
+}
+async function searchPlaces(query) {
+  el('place-status').textContent='Haetaan…'; el('place-results').replaceChildren();
+  try {
+    const {results}=await json(`/api/geocode?q=${encodeURIComponent(query)}`);
+    el('place-status').textContent=results.length?'Valitse paikka:':`Paikkaa ”${query}” ei löytynyt.`;
+    el('place-results').replaceChildren(...results.filter(validPlace).map(r=>{
+      const li=document.createElement('li'), detail=document.createElement('small');
+      const pick=button('pick',r.name,()=>{
+        const place=state.places.find(p=>samePlace(p,r)) ?? {name:r.name, lat:r.lat, lon:r.lon};
+        if(!state.places.includes(place)) {state.places.push(place); saved.set('omaavaruus.places',state.places);}
+        el('place-query').value=''; selectPlace(place);
+      });
+      detail.textContent=[r.region,r.country].filter(Boolean).join(', ');
+      if(detail.textContent) pick.append(' ',detail);
+      li.append(pick); return li;
+    }));
+  } catch(e) {el('place-status').textContent=e.message;}
 }
 let board=null, stale=false, warning='';
 function render() {
@@ -152,16 +217,22 @@ function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); re
   document.querySelector('.live').textContent='PÄIVITTYVÄ';
   document.querySelectorAll('[data-info-slot]').forEach(n=>n.append(infoBtn(n.dataset.infoSlot))); clock(); setInterval(clock,1000);
   el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
-  try {const c=await json('/api/config'); state.lat=c.default_lat; state.lon=c.default_lon;} catch(e) {console.warn(e);}
-  weather(); sky(); launches(); setInterval(weather,300000); setInterval(sky,60000);
+  el('place-toggle').addEventListener('click',()=>togglePanel(el('place-panel').hidden));
+  el('place-search').addEventListener('submit',e=>{e.preventDefault(); const q=el('place-query').value.trim(); if(q.length>=2) searchPlaces(q);});
+  const stored=saved.get('omaavaruus.places',[]);
+  state.places=Array.isArray(stored)?stored.filter(validPlace).map(p=>({name:p.name, lat:p.lat, lon:p.lon})):[];
+  state.place=state.places[saved.get('omaavaruus.selected',null)] ?? null;
+  try {const c=await json('/api/config'); state.fallback={name:c.default_place, lat:c.default_lat, lon:c.default_lon};} catch(e) {console.warn(e);}
+  applyPlace(); launches(); setInterval(weather,300000); setInterval(sky,60000);
   if(navigator.geolocation) {
     // Tarkka paikannus (GPS, jos saatavilla). Haetaan uudelleen vain, jos sijainti siirtyy yli 200 m.
-    const moved=(lat,lon)=>Math.hypot((lat-state.lat)*111320,(lon-state.lon)*111320*Math.cos(lat*Math.PI/180))>200;
+    const moved=(a,b)=>Math.hypot((a.lat-b.lat)*111320,(a.lon-b.lon)*111320*Math.cos(a.lat*Math.PI/180))>200;
     navigator.geolocation.watchPosition(p=>{
-      const {latitude:lat, longitude:lon, accuracy}=p.coords, first=state.accuracy==null;
-      const refresh=first||moved(lat,lon);
-      state.accuracy=accuracy;
-      if(refresh) {state.lat=lat; state.lon=lon; weather(); sky();}
+      const gps={lat:p.coords.latitude, lon:p.coords.longitude, accuracy:p.coords.accuracy};
+      const refresh=!state.gps||moved(gps,state);
+      state.gps=gps;
+      // Valittu paikka pysyy voimassa; oma sijainti päivittyy taustalla sitä varten, että siihen palataan.
+      if(state.place) renderPlaces(); else if(refresh) applyPlace();
     },e=>console.warn('Paikannus epäonnistui:',e.message), {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
   }
 })();
