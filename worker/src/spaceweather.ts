@@ -224,27 +224,14 @@ async function solarWind(): Promise<[number | null, number | null, number | null
   return [speed, bz, bt];
 }
 
-async function alerts(): Promise<string[]> {
-  try {
-    const rows = await swpc("/products/alerts.json");
-    return rows
-      .slice(0, 5)
-      .map((row) => String(row.message ?? "").split(/\s+/).filter(Boolean).join(" ").slice(0, 280))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 function swpcData() {
   return cached("spaceweather", TTL_S, async () => {
-    const [history, forecast, [speed, bz, bt], alertList] = await Promise.all([
+    const [history, forecast, [speed, bz, bt]] = await Promise.all([
       kpHistory(),
       kpForecast(),
       solarWind(),
-      alerts(),
     ]);
-    return { history, forecast, speed, bz, bt, alertList };
+    return { history, forecast, speed, bz, bt };
   }, true);
 }
 
@@ -252,7 +239,7 @@ export async function getSpaceWeather(lat: number, lon: number) {
   const now = new Date();
   // Pilvisyyden tai OVATION-mallin haun epäonnistuminen ei saa kaataa avaruussäätä:
   // arvio tehdään silloin Kp:stä ja ilman pilvisyyttä.
-  const [{ history, forecast, speed, bz, bt, alertList }, clouds, grid] = await Promise.all([
+  const [{ history, forecast, speed, bz, bt }, clouds, grid] = await Promise.all([
     swpcData(),
     getCloudCover(lat, lon).catch((exc): CloudCover | null => {
       console.warn(`Pilvisyyden haku epäonnistui: ${exc}`);
@@ -296,7 +283,6 @@ export async function getSpaceWeather(lat: number, lon: number) {
     cloud_provider: clouds?.provider ?? null,
     hourly,
     best_window: bestWindow(hourly),
-    alerts: alertList,
     sources: [
       `${SWPC}/products/noaa-planetary-k-index.json`,
       "https://www.swpc.noaa.gov/products/planetary-k-index",
