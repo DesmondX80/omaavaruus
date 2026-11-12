@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
 import { getEvents } from "../src/events";
+import { binSolarWind } from "../src/solarwind";
 import { parsePlaces } from "../src/geocode";
 import { asRecords, clearCache } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { getSkyObject, moonPhaseName, skyLight } from "../src/sky";
 import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
-import { ovationAt, ovationLevel, parseOvation } from "../src/ovation";
+import { ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
 const env: Env = {
@@ -257,6 +258,38 @@ describe("reitit", () => {
     const r = await get("/api/events?lat=65&lon=25.5");
     expect(r.status).toBe(200);
     expect((await r.json<any>()).events.length).toBeGreaterThan(10);
+  });
+
+  it("laskee aurinkotuulen kymmenen minuutin keskiarvot aktiivisesta satelliitista", () => {
+    const now = Date.parse("2026-11-12T22:15:00Z");
+    const wind = [
+      { time_tag: "2026-11-12T22:12:00", active: true, source: "SOLAR1", proton_speed: 400, proton_density: 2 },
+      { time_tag: "2026-11-12T22:11:00", active: true, source: "SOLAR1", proton_speed: 420, proton_density: null },
+      { time_tag: "2026-11-12T22:12:00", active: false, source: "ACE", proton_speed: 900, proton_density: 50 },
+      { time_tag: "2026-11-12T21:05:00", active: true, source: "SOLAR1", proton_speed: 500, proton_density: 4 },
+      { time_tag: "2026-11-10T21:05:00", active: true, source: "SOLAR1", proton_speed: 999, proton_density: 9 },
+    ];
+    const mag = [{ time_tag: "2026-11-12T22:13:00", active: true, source: "SOLAR1", bz_gsm: -3.26, bt: 5 }];
+    const { source, points } = binSolarWind(wind, mag, now);
+    expect(source).toBe("SOLAR1");
+    expect(points).toHaveLength(144);
+    expect(points.at(-1)).toEqual({ time_tag: "2026-11-12T22:10:00.000Z", speed_kms: 410, density_cm3: 2, bz_nt: -3.3, bt_nt: 5 });
+    expect(points.find((p) => p.time_tag === "2026-11-12T21:00:00.000Z")!.speed_kms).toBe(500);
+    expect(points.filter((p) => p.speed_kms !== null)).toHaveLength(2);
+  });
+
+  it("antaa OVATION-ruudukon havaitsijan pallonpuoliskolta kartalle", () => {
+    const grid = parseOvation({
+      "Observation Time": "2026-11-12T22:00:00Z",
+      "Forecast Time": "2026-11-12T22:40:00Z",
+      coordinates: [[25, 67, 30], [25, -67, 12], [300, 90, 4]],
+    });
+    const north = ovationMap(grid, false);
+    expect(north).toMatchObject({ hemisphere: "north", lat_min: 40 });
+    expect(north.rows).toHaveLength(51);
+    expect(north.rows[67 - 40][25]).toBe(30);
+    expect(north.rows[50][300]).toBe(4);
+    expect(ovationMap(grid, true).rows[67 - 40][25]).toBe(12);
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

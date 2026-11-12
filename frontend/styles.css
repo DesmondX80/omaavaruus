@@ -104,6 +104,11 @@ h2 .info-btn { margin-left: 6px; }
 #kp-chart { width: 100%; height: auto; margin-top: 10px; }
 .alerts { margin: 10px 0 0; padding-left: 18px; color: var(--warm); font-size: 12px; }
 .alerts li { margin-bottom: 4px; }
+.ovation-map { display: block; width: 100%; max-width: 360px; aspect-ratio: 1; margin: 0 auto 6px; }
+.wind-charts { margin-top: 12px; }
+.wind-charts h3 { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.wind-charts svg { display: block; width: 100%; height: auto; }
+.wind-now { margin-left: auto; color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 400; }
 .sky-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 13px; }
 .sky-controls input { width: 140px; }
 #sky-chart { width: 100%; height: auto; display: block; cursor: pointer; touch-action: manipulation; }

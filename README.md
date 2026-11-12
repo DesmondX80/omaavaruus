@@ -22,6 +22,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 
 - **Avaruussää**: Kp-indeksi (NOAA SWPC), G-asteikko, aurinkotuulen nopeus, Bz ja hälytykset.
 - **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
+- **Revontuliovaali ja aurinkotuuli**: OVATION-mallin ennuste napakarttana (mantereiden ääriviivat Natural Earth 110m) ja aurinkotuulen nopeus, tiheys ja Bz vuorokauden ajalta (NOAA SWPC:n reaaliaikamittaukset, DSCOVR/ACE/IMAP).
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h.
 - **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
@@ -38,7 +39,8 @@ worker/
     index.ts         # reititys, parametrien tarkistus, CORS
     http.ts          # TTL-välimuisti, fetch + SWPC-muodon normalisointi
     spaceweather.ts  # NOAA SWPC: Kp, aurinkotuuli ja revontuliarvio
-    ovation.ts       # OVATION Prime -revontulimalli (SWPC)
+    ovation.ts       # OVATION Prime -revontulimalli (SWPC) ja kartan ruudukko
+    solarwind.ts     # aurinkotuulen reaaliaikamittaukset (SWPC RTSW)
     clouds.ts        # pilvisyysennuste (FMI, varalla Open-Meteo)
     geocode.ts       # paikannimihaku (Open-Meteo Geocoding)
     push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus (revontulet, laukaisut)
@@ -54,7 +56,7 @@ frontend/
   js/                # ES-moduulit ilman käännösvaihetta
     main.js          # käynnistys ja ajastukset
     core.js          # jaettu tila, API-kutsut, apufunktiot
-    weather.js, sky.js, skychart.js, events.js, places.js, push.js, launches.js, info.js
+    weather.js, solarwind.js, land.js, sky.js, skychart.js, events.js, places.js, push.js, launches.js, info.js
 ```
 
 ## Julkaisu
@@ -82,6 +84,8 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `GET /api/health` | Terveystarkistus |
 | `GET /api/config` | Oletuskoordinaatit |
 | `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, OVATION-todennäköisyys (`ovation`), revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
+| `GET /api/solarwind` | Aurinkotuulen nopeus, tiheys, Bz ja Bt 10 minuutin keskiarvoina viimeisen vuorokauden ajalta |
+| `GET /api/ovation?lat` | OVATION-ennuste havaitsijan pallonpuoliskolta leveysasteelta 40° navalle |
 | `GET /api/geocode?q=Rovaniemi` | Paikannimihaku, enintään 5 osumaa |
 | `GET /api/push/key` | Ilmoitusten julkinen VAPID-avain |
 | `POST /api/push/subscribe` | Tallentaa tai päivittää ilmoitustilauksen (`subscription`, `lat`, `lon`, `place`, `threshold`, valinnainen `launch_providers`) |

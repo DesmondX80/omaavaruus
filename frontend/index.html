@@ -71,6 +71,21 @@
       <ul id="alerts" class="alerts"></ul>
     </section>
 
+    <section class="card" id="solarwind">
+      <h2 class="info-host" data-info-slot="oval">Revontuliovaali ja aurinkotuuli</h2>
+      <canvas id="ovation-map" class="ovation-map" width="320" height="320" role="img" aria-label="Revontuliovaali napakarttana"></canvas>
+      <div id="ovation-meta" class="muted">Ladataan…</div>
+      <div class="wind-charts">
+        <h3 class="info-host" data-info-slot="wind">Nopeus <span id="wind-speed-now" class="wind-now"></span></h3>
+        <svg id="wind-speed" viewBox="0 0 320 70" role="img" aria-label="Aurinkotuulen nopeus vuorokauden ajalta"></svg>
+        <h3 class="info-host" data-info-slot="density">Tiheys <span id="wind-density-now" class="wind-now"></span></h3>
+        <svg id="wind-density" viewBox="0 0 320 70" role="img" aria-label="Aurinkotuulen tiheys vuorokauden ajalta"></svg>
+        <h3 class="info-host" data-info-slot="bz">Bz <span id="wind-bz-now" class="wind-now"></span></h3>
+        <svg id="wind-bz" viewBox="0 0 320 70" role="img" aria-label="Magneettikentän Bz-komponentti vuorokauden ajalta"></svg>
+      </div>
+      <div id="wind-meta" class="muted"></div>
+    </section>
+
     <section class="card" id="sky">
       <h2 class="info-host" data-info-slot="sky">Taivaankartta</h2>
       <div class="sky-controls">

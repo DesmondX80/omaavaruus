@@ -90,6 +90,21 @@ export function ovationLevel(point: Pick<OvationPoint, "probability" | "nearby">
   return Math.max(step(point.probability), step(point.nearby) - 1);
 }
 
+/** Kartan reunan leveysaste: tätä lähempänä päiväntasaajaa revontulia näkyy vain poikkeuksellisissa myrskyissä. */
+export const MAP_LAT_MIN = 40;
+
+/**
+ * Havaitsijan pallonpuoliskon ruudukko kartalle: rivi kutakin leveysastetta kohden reunalta (MAP_LAT_MIN) navalle,
+ * rivissä todennäköisyys pituusasteille 0…359.
+ */
+export function ovationMap(grid: OvationGrid, south: boolean) {
+  const rows = Array.from({ length: 91 - MAP_LAT_MIN }, (_, i) => {
+    const lat = south ? -(MAP_LAT_MIN + i) : MAP_LAT_MIN + i;
+    return Array.from({ length: 360 }, (_, lon) => grid.values[lon * LATS + lat + 90]);
+  });
+  return { observed: grid.observed, forecast: grid.forecast, hemisphere: south ? "south" : "north", lat_min: MAP_LAT_MIN, rows };
+}
+
 /** Viimeisin malliajo ruudukkona. Heittää virheen, jos syöte puuttuu tai on vanhentunut. */
 export async function getOvation(now = new Date()): Promise<OvationGrid> {
   const grid = await cached("ovation", TTL_S, async () => parseOvation(await fetchJson(OVATION_URL, TTL_S)));

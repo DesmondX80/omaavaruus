@@ -3,7 +3,9 @@ import { searchPlaces } from "./geocode";
 import { cached, HttpError } from "./http";
 import { getLaunches } from "./launches";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
+import { getOvation, ovationMap } from "./ovation";
 import { getSkyChart, getSkyObject } from "./sky";
+import { getSolarWind } from "./solarwind";
 import { getSpaceWeather } from "./spaceweather";
 
 export interface Env extends PushEnv {
@@ -76,6 +78,18 @@ async function route(url: URL, env: Env): Promise<unknown> {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
       }
+    }
+    case "/api/solarwind":
+      return getSolarWind().catch((exc) => {
+        throw new HttpError(503, `Aurinkotuulen haku epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
+      });
+    case "/api/ovation": {
+      const south = lat() < 0;
+      return getOvation()
+        .then((grid) => ovationMap(grid, south))
+        .catch((exc) => {
+          throw new HttpError(503, `Revontulimallin haku epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
+        });
     }
     case "/api/events": {
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
