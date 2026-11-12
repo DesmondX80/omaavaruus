@@ -38,6 +38,7 @@ worker/
     http.ts          # TTL-välimuisti, fetch + SWPC-muodon normalisointi
     spaceweather.ts  # NOAA SWPC: Kp, aurinkotuuli ja revontuliarvio
     ovation.ts       # OVATION Prime -revontulimalli (SWPC)
+    clouds.ts        # pilvisyysennuste (FMI, varalla Open-Meteo)
     geocode.ts       # paikannimihaku (Open-Meteo Geocoding)
     push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus
     webpush.ts       # push-viestin salaus (RFC 8291) ja VAPID-tunniste (RFC 8292)
@@ -89,7 +90,4 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 
 ## Seuraavat askeleet
 
-1. Kääri taivaankartta WebGL:ään (esim. three.js) ja lisää tähtikuvioiden viivat.
-2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit (esim. aurinkotuulen tiheys ja käyrät) ja OVATION-kartta.
-3. Suodata laukaisut suosikkitoimijoittain ja ilmoita laukaisuista (web push on jo käytössä revontulille).
-4. Jaettu välimuisti Workers KV:llä, jos isolaattikohtainen välimuisti ei riitä.
+Suunnitellut ominaisuudet ja parannukset ovat [repon issueissa](https://github.com/DesmondX80/omaavaruus/issues).
