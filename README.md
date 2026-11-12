@@ -37,7 +37,7 @@ worker/
   wrangler.toml      # Workerin asetukset, oletuspaikka, CORS-originit
   src/
     index.ts         # reititys, parametrien tarkistus, CORS
-    http.ts          # TTL-välimuisti, fetch + SWPC-muodon normalisointi
+    http.ts          # välimuisti (isolaatti + datakeskuksen Cache API), fetch + SWPC-muodon normalisointi
     spaceweather.ts  # NOAA SWPC: Kp, aurinkotuuli ja revontuliarvio
     ovation.ts       # OVATION Prime -revontulimalli (SWPC) ja kartan ruudukko
     solarwind.ts     # aurinkotuulen reaaliaikamittaukset (SWPC RTSW)
@@ -81,7 +81,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 
 | Reitti | Kuvaus |
 | --- | --- |
-| `GET /api/health` | Terveystarkistus |
+| `GET /api/health` | Terveystarkistus; `shared_cache` kertoo, toimiiko jaettu välimuisti |
 | `GET /api/config` | Oletuskoordinaatit |
 | `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, OVATION-todennäköisyys (`ovation`), revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
 | `GET /api/solarwind` | Aurinkotuulen nopeus, tiheys, Bz ja Bt 10 minuutin keskiarvoina viimeisen vuorokauden ajalta |

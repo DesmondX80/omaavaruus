@@ -5,12 +5,12 @@ import { parseFmiSimple } from "../src/clouds";
 import { getEvents } from "../src/events";
 import { binSolarWind } from "../src/solarwind";
 import { parsePlaces } from "../src/geocode";
-import { asRecords, clearCache } from "../src/http";
+import { asRecords, cached, clearCache, sharedCacheWorks } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { getSkyObject, moonPhaseName, skyLight } from "../src/sky";
 import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
-import { ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
+import { GRID_CODEC, ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
 const env: Env = {
@@ -290,6 +290,41 @@ describe("reitit", () => {
     expect(north.rows[67 - 40][25]).toBe(30);
     expect(north.rows[50][300]).toBe(4);
     expect(ovationMap(grid, true).rows[67 - 40][25]).toBe(12);
+    // Jaettuun välimuistiin tallennettu ruudukko palautuu samanlaisena.
+    grid.values.forEach((_, i) => (grid.values[i] = i % 101));
+    const restored = GRID_CODEC.decode(JSON.parse(JSON.stringify(GRID_CODEC.encode(grid))));
+    expect(restored).toEqual(grid);
+  });
+
+  it("jakaa arvon isolaattien kesken Cache API:n kautta", async () => {
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      default: {
+        match: async (url: string) => entries.get(url)?.clone(),
+        put: async (url: string, response: Response) => void entries.set(url, response),
+      },
+    });
+    const codec = { encode: (v: Uint8Array) => [...v], decode: (s: unknown) => Uint8Array.from(s as number[]) };
+    const factory = vi.fn(async () => new Uint8Array([1, 2, 3]));
+    expect(await cached("jaettu", 60, factory, codec)).toEqual(new Uint8Array([1, 2, 3]));
+    // Uusi isolaatti: oma välimuisti on tyhjä, mutta arvo löytyy jaetusta välimuistista.
+    clearCache();
+    expect(await cached("jaettu", 60, factory, codec)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(factory).toHaveBeenCalledTimes(1);
+    // Ilman shared-valintaa arvoa ei tallenneta jaettuun välimuistiin.
+    await cached("oma", 60, async () => 1);
+    expect([...entries.keys()].map((url) => decodeURIComponent(url.split("/").pop()!))).toEqual(["jaettu"]);
+    expect(await sharedCacheWorks()).toBe(true);
+    // Vanhentunut jaettu arvo: Cache API ei palauta sitä, joten haetaan uusi.
+    clearCache();
+    entries.clear();
+    expect(await cached("jaettu", 60, factory, codec)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(factory).toHaveBeenCalledTimes(2);
+  });
+
+  it("ei käytä jaettua välimuistia, jos sitä ei ole", async () => {
+    expect(await sharedCacheWorks()).toBe(false);
+    expect(await cached("jaettu-ei", 60, async () => 5, true)).toBe(5);
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

@@ -245,7 +245,7 @@ function swpcData() {
       alerts(),
     ]);
     return { history, forecast, speed, bz, bt, alertList };
-  });
+  }, true);
 }
 
 export async function getSpaceWeather(lat: number, lon: number) {

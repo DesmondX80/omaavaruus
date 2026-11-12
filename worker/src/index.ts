@@ -1,6 +1,6 @@
 import { getEvents } from "./events";
 import { searchPlaces } from "./geocode";
-import { cached, HttpError } from "./http";
+import { cached, HttpError, sharedCacheWorks } from "./http";
 import { getLaunches } from "./launches";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
 import { getOvation, ovationMap } from "./ovation";
@@ -44,7 +44,7 @@ async function route(url: URL, env: Env): Promise<unknown> {
   const lon = () => numberParam(url, "lon", Number(env.DEFAULT_LON), -180, 180);
   switch (url.pathname) {
     case "/api/health":
-      return { status: "ok", time: new Date().toISOString() };
+      return { status: "ok", time: new Date().toISOString(), shared_cache: await sharedCacheWorks() };
     case "/api/config":
       return {
         default_lat: Number(env.DEFAULT_LAT),
@@ -94,7 +94,7 @@ async function route(url: URL, env: Env): Promise<unknown> {
     case "/api/events": {
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
       const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
-      return cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()));
+      return cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()), true);
     }
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();

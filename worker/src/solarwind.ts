@@ -62,5 +62,5 @@ export function getSolarWind(now = new Date()) {
     const [wind, mag] = await Promise.all([fetchJson(`${RTSW}/rtsw_wind_1m.json`, TTL_S), fetchJson(`${RTSW}/rtsw_mag_1m.json`, TTL_S)]);
     if (!Array.isArray(wind) || !Array.isArray(mag)) throw new Error("Aurinkotuulisyötteen muoto on tuntematon");
     return { updated: now.toISOString(), ...binSolarWind(wind as Row[], mag as Row[], now.getTime()) };
-  });
+  }, true);
 }

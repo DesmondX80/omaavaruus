@@ -3,7 +3,7 @@
  * noin 30–90 minuutin päähän. Malli laskee aurinkotuulen mittauksista, missä revontuliovaali on,
  * joten se on Kp-heuristiikkaa tarkempi nykyhetken arvio. Taivaan valoisuutta ja pilvisyyttä se ei huomioi.
  */
-import { cached, fetchJson } from "./http";
+import { cached, fetchJson, type Codec } from "./http";
 
 export const OVATION_URL = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
 const TTL_S = 300;
@@ -105,9 +105,23 @@ export function ovationMap(grid: OvationGrid, south: boolean) {
   return { observed: grid.observed, forecast: grid.forecast, hemisphere: south ? "south" : "north", lat_min: MAP_LAT_MIN, rows };
 }
 
+/** Ruudukko jaettuun välimuistiin base64-merkkijonona: noin 87 kt JSONia jäsennetyn syötteen 0,9 Mt:n sijaan. */
+export const GRID_CODEC: Codec<OvationGrid> = {
+  encode: (grid) => {
+    // Paloissa: koko taulukko yhden kutsun argumentteina ylittäisi argumenttien enimmäismäärän.
+    let binary = "";
+    for (let i = 0; i < grid.values.length; i += 8192) binary += String.fromCharCode(...grid.values.subarray(i, i + 8192));
+    return { ...grid, values: btoa(binary) };
+  },
+  decode: (stored) => {
+    const raw = stored as Omit<OvationGrid, "values"> & { values: string };
+    return { ...raw, values: Uint8Array.from(atob(raw.values), (c) => c.charCodeAt(0)) };
+  },
+};
+
 /** Viimeisin malliajo ruudukkona. Heittää virheen, jos syöte puuttuu tai on vanhentunut. */
 export async function getOvation(now = new Date()): Promise<OvationGrid> {
-  const grid = await cached("ovation", TTL_S, async () => parseOvation(await fetchJson(OVATION_URL, TTL_S)));
+  const grid = await cached("ovation", TTL_S, async () => parseOvation(await fetchJson(OVATION_URL, TTL_S)), GRID_CODEC);
   if (now.getTime() - Date.parse(grid.forecast) > MAX_AGE_MS) throw new Error(`OVATION-ennuste on vanhentunut (${grid.forecast})`);
   return grid;
 }
