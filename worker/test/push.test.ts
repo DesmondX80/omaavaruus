@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
-import { checkSubscriptions, shouldNotify, type Subscription } from "../src/push";
+import { resetLaunchState } from "../src/launches";
+import { checkSubscriptions, launchesToNotify, shouldNotify, type Subscription } from "../src/push";
 import { b64urlEncode } from "../src/webpush";
 import { memoryKv } from "./helpers";
 
@@ -41,6 +42,7 @@ beforeEach(async () => {
   };
   pushStatus = 201;
   pushCalls = [];
+  resetLaunchState();
   // Pimeä yö lähellä uuttakuuta, Kp 5,33 ja selkeä taivas: Oulussa arvio on "Erittäin hyvä".
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-08T23:30:00Z"));
@@ -50,6 +52,15 @@ beforeEach(async () => {
       if (url === ENDPOINT) {
         pushCalls.push({ url, headers: new Headers(init?.headers), bytes: (init?.body as Uint8Array).length });
         return new Response("", { status: pushStatus });
+      }
+      if (url.startsWith("https://fdo.rocketlaunch.live/")) {
+        return Response.json({
+          result: [
+            { id: 1, name: "Starlink 12-3", t0: "2026-11-09T00:10Z", provider: { name: "SpaceX" }, vehicle: { name: "Falcon 9" }, pad: {} },
+            { id: 2, name: "Electron | Test", t0: "2026-11-09T00:20Z", provider: { name: "Rocket Lab" }, vehicle: { name: "Electron" }, pad: {} },
+            { id: 3, name: "Starlink 12-4", t0: "2026-11-09T05:00Z", provider: { name: "SpaceX" }, vehicle: { name: "Falcon 9" }, pad: {} },
+          ],
+        });
       }
       if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-11-08T21:00:00", Kp: 5.33 }]);
       if (url.startsWith("https://opendata.fmi.fi/")) {
@@ -78,7 +89,7 @@ describe("ilmoitustilaukset", () => {
   it("tallentaa tilauksen sijainnin 0,1 asteen tarkkuudella ja päivittää sen", async () => {
     const r = await post("/api/push/subscribe", subscribeBody());
     expect(r.status).toBe(200);
-    expect(stored()).toEqual([{ endpoint: ENDPOINT, keys: browserKeys, lat: 65, lon: 25.5, place: "Oulu", threshold: "Hyvä" }]);
+    expect(stored()).toEqual([{ endpoint: ENDPOINT, keys: browserKeys, lat: 65, lon: 25.5, place: "Oulu", threshold: "Hyvä", launch_providers: [] }]);
     await post("/api/push/subscribe", subscribeBody({ place: "Rovaniemi", lat: 66.49897, lon: 25.68867, threshold: "Mahdollinen" }));
     expect(stored()).toHaveLength(1);
     expect(stored()[0]).toMatchObject({ lat: 66.5, lon: 25.7, place: "Rovaniemi", threshold: "Mahdollinen" });
@@ -127,25 +138,53 @@ describe("ilmoitusten ajastettu tarkistus", () => {
 
   it("lähettää ilmoituksen kerran ja muistaa sen", async () => {
     await post("/api/push/subscribe", subscribeBody());
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 1 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 1, launches_sent: 0 });
     expect(pushCalls).toHaveLength(1);
     expect(stored()[0].last).toEqual({ at: "2026-11-08T23:30:00.000Z", level: 3 });
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
     expect(pushCalls).toHaveLength(1);
   });
 
   it("ei ilmoita rajan alapuolella", async () => {
     // Leveysasteella 60 sama Kp antaa vain arvion "Mahdollinen".
     await post("/api/push/subscribe", subscribeBody({ lat: 60, threshold: "Erittäin hyvä" }));
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
     expect(pushCalls).toEqual([]);
   });
 
   it("poistaa tilauksen, jonka push-palvelu ilmoittaa lakanneen", async () => {
     await post("/api/push/subscribe", subscribeBody());
     pushStatus = 410;
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
     expect(stored()).toEqual([]);
+  });
+
+  it("valitsee ilmoitettaviksi suosikkitoimijan alkavat laukaisut", () => {
+    const now = Date.parse("2026-11-08T23:30:00Z");
+    const launch = (id: string, provider: string, minutes: number) =>
+      ({ id, provider, net: new Date(now + minutes * 60_000).toISOString() }) as any;
+    const launches = [launch("a", "SpaceX", 40), launch("b", "Rocket Lab", 40), launch("c", "SpaceX", 120), launch("d", "SpaceX", -5)];
+    expect(launchesToNotify({ launch_providers: ["SpaceX"] }, launches, now).map((l) => l.id)).toEqual(["a"]);
+    expect(launchesToNotify({ launch_providers: ["SpaceX"], launches_notified: ["a@2026-11-09"] }, launches, now)).toEqual([]);
+    // Toiselle päivälle siirtyneestä laukaisusta ilmoitetaan uudelleen.
+    expect(launchesToNotify({ launch_providers: ["SpaceX"], launches_notified: ["a@2026-11-08"] }, launches, now)).toHaveLength(1);
+    expect(launchesToNotify({}, launches, now)).toEqual([]);
+  });
+
+  it("ilmoittaa suosikkitoimijan laukaisusta kerran", async () => {
+    await post("/api/push/subscribe", subscribeBody({ threshold: "Erittäin hyvä", lat: 60, launch_providers: ["SpaceX"] }));
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1 });
+    expect(stored()[0].launches_notified).toEqual(["1@2026-11-09"]);
+    // Asetusten päivitys ei unohda jo ilmoitettuja laukaisuja.
+    await post("/api/push/subscribe", subscribeBody({ threshold: "Erittäin hyvä", lat: 60, launch_providers: ["SpaceX", "Rocket Lab"] }));
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1 });
+    expect(stored()[0].launches_notified).toEqual(["1@2026-11-09", "2@2026-11-09"]);
+    expect(pushCalls).toHaveLength(2);
+  });
+
+  it("hylkää virheellisen suosikkilistan", async () => {
+    expect((await post("/api/push/subscribe", subscribeBody({ launch_providers: "SpaceX" }))).status).toBe(422);
+    expect((await post("/api/push/subscribe", subscribeBody({ launch_providers: [""] }))).status).toBe(422);
   });
 
   it("käynnistyy cron-ajastuksesta", async () => {

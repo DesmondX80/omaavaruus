@@ -1,5 +1,6 @@
-/** Revontuli-ilmoitukset: tilausten tallennus Workers KV:hen ja ajastettu tarkistus, joka lähettää push-viestit. */
+/** Revontuli- ja laukaisuilmoitukset: tilausten tallennus Workers KV:hen ja ajastettu tarkistus, joka lähettää push-viestit. */
 import { HttpError } from "./http";
+import { getLaunches, type Launch } from "./launches";
 import { CHANCE_LEVELS, getSpaceWeather } from "./spaceweather";
 import { generateVapidKeys, sendPush, type PushTarget, type VapidKeys } from "./webpush";
 
@@ -17,6 +18,10 @@ export interface Subscription extends PushTarget {
   threshold: string;
   /** Viimeisin lähetetty ilmoitus: estää saman tilanteen toistuvat ilmoitukset. */
   last?: { at: string; level: number };
+  /** Suosikkitoimijat, joiden laukaisuista ilmoitetaan. Tyhjä tai puuttuva: ei laukaisuilmoituksia. */
+  launch_providers?: string[];
+  /** Laukaisut, joista on jo ilmoitettu (ks. launchKey). */
+  launches_notified?: string[];
 }
 
 /** Sallitut push-palvelut: Worker ei lähetä pyyntöjä mielivaltaisiin osoitteisiin. */
@@ -25,6 +30,11 @@ const VAPID_KEY = "vapid";
 const SUB_PREFIX = "sub:";
 /** Samasta tai heikommasta tilanteesta ei ilmoiteta uudelleen tämän ajan sisällä. */
 const COOLDOWN_MS = 6 * 3_600_000;
+/** Suosikkitoimijan laukaisusta ilmoitetaan, kun siihen on enintään tämän verran aikaa. */
+const LAUNCH_LEAD_MS = 3_600_000;
+const MAX_PROVIDERS = 20;
+/** Kuinka monta ilmoitettua laukaisua tilaus muistaa; lista seuraavista laukaisuista on tätä lyhyempi. */
+const MAX_NOTIFIED = 20;
 /** Revontulitilanne vanhenee nopeasti: push-palvelu saa yrittää toimitusta tunnin. */
 const TTL_S = 3600;
 
@@ -78,17 +88,32 @@ function parseSubscription(body: Record<string, unknown>): Subscription {
   }
   const threshold = String(body.threshold);
   if (CHANCE_LEVELS.indexOf(threshold) < 1) throw invalid("Ilmoitusraja on virheellinen.");
+  const providers = body.launch_providers ?? [];
+  if (!Array.isArray(providers) || providers.length > MAX_PROVIDERS || providers.some((p) => typeof p !== "string" || !p || p.length > 80)) {
+    throw invalid("Suosikkitoimijoiden lista on virheellinen.");
+  }
   const place = typeof body.place === "string" ? body.place.trim().slice(0, 80) : "";
   // Sijainti tallennetaan 0,1 asteen (noin 10 km) tarkkuudella: riittää pilvisyysennusteeseen, mutta ei paljasta tarkkaa paikkaa.
   const round = (value: number) => Math.round(value * 10) / 10;
-  return { endpoint, keys: { p256dh, auth }, lat: round(lat), lon: round(lon), place: place || "valittu paikka", threshold };
+  return {
+    endpoint,
+    keys: { p256dh, auth },
+    lat: round(lat),
+    lon: round(lon),
+    place: place || "valittu paikka",
+    threshold,
+    launch_providers: [...new Set(providers as string[])],
+  };
 }
 
-/** Tallentaa tilauksen tai päivittää sen paikan ja rajan. */
+/** Tallentaa tilauksen tai päivittää sen paikan, rajan ja suosikkitoimijat. */
 export async function subscribe(env: PushEnv, body: Record<string, unknown>) {
   const sub = parseSubscription(body);
-  await env.SUBSCRIPTIONS.put(await subscriptionKey(sub.endpoint), JSON.stringify(sub));
-  return { ok: true, place: sub.place, lat: sub.lat, lon: sub.lon, threshold: sub.threshold };
+  const key = await subscriptionKey(sub.endpoint);
+  // Jo ilmoitetut laukaisut säilyvät, jottei asetusten muutos toista ilmoitusta.
+  const launches_notified = (await env.SUBSCRIPTIONS.get<Subscription>(key, "json"))?.launches_notified;
+  await env.SUBSCRIPTIONS.put(key, JSON.stringify({ ...sub, launches_notified }));
+  return { ok: true, place: sub.place, lat: sub.lat, lon: sub.lon, threshold: sub.threshold, launch_providers: sub.launch_providers };
 }
 
 export async function unsubscribe(env: PushEnv, body: Record<string, unknown>) {
@@ -124,7 +149,18 @@ export function shouldNotify(sub: Pick<Subscription, "threshold" | "last">, leve
   return level > sub.last.level || now - Date.parse(sub.last.at) >= COOLDOWN_MS;
 }
 
-/** Ajastettu tarkistus: laskee arvion kunkin tilauksen paikalle ja lähettää ilmoitukset. */
+/** Laukaisun tunniste ilmoituksia varten. Päivämäärä on mukana, jotta toiselle päivälle siirtyneestä laukaisusta ilmoitetaan uudelleen. */
+const launchKey = (launch: Launch) => `${launch.id}@${launch.net?.slice(0, 10)}`;
+
+/** Suosikkitoimijoiden laukaisut, jotka ovat alkamassa ja joista ei ole vielä ilmoitettu. */
+export function launchesToNotify(sub: Pick<Subscription, "launch_providers" | "launches_notified">, launches: Launch[], now: number): Launch[] {
+  return launches.filter((launch) => {
+    const lead = launch.net ? Date.parse(launch.net) - now : NaN;
+    return lead > 0 && lead <= LAUNCH_LEAD_MS && !!sub.launch_providers?.includes(launch.provider) && !sub.launches_notified?.includes(launchKey(launch));
+  });
+}
+
+/** Ajastettu tarkistus: laskee arvion kunkin tilauksen paikalle, käy läpi suosikkitoimijoiden laukaisut ja lähettää ilmoitukset. */
 export async function checkSubscriptions(env: PushEnv, now = new Date()) {
   const subs: [string, Subscription][] = [];
   let cursor: string | undefined;
@@ -158,12 +194,36 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
       });
       if (ok) {
         sent++;
-        await env.SUBSCRIPTIONS.put(key, JSON.stringify({ ...sub, last: { at: now.toISOString(), level } }));
+        sub.last = { at: now.toISOString(), level };
+        await env.SUBSCRIPTIONS.put(key, JSON.stringify(sub));
       }
     } catch (exc) {
       // Yhden paikan tai tilauksen virhe ei saa estää muiden ilmoituksia.
       console.warn(`Ilmoituksen tarkistus epäonnistui (${place}): ${exc}`);
     }
   }
-  return { subscriptions: subs.length, sent };
+
+  let launchesSent = 0;
+  const followers = subs.filter(([, sub]) => sub.launch_providers?.length);
+  // Laukaisulistan haun virhe ei saa kaataa tarkistusta: ilmoitus ehtii vielä seuraavalla kierroksella.
+  const launches = followers.length ? await getLaunches().then((board) => board.results, () => []) : [];
+  for (const [key, sub] of followers) {
+    for (const launch of launchesToNotify(sub, launches, now.getTime())) {
+      try {
+        const minutes = Math.round((Date.parse(launch.net!) - now.getTime()) / 60_000);
+        const ok = await deliver(env, key, sub, {
+          title: `Laukaisu pian: ${launch.name}`,
+          body: `${[launch.provider, launch.rocket, launch.location].filter(Boolean).join(" · ")}. Laukaisuun noin ${minutes} min.`,
+          tag: `launch-${launch.id}`,
+        });
+        if (!ok) continue;
+        launchesSent++;
+        sub.launches_notified = [...(sub.launches_notified ?? []), launchKey(launch)].slice(-MAX_NOTIFIED);
+        await env.SUBSCRIPTIONS.put(key, JSON.stringify(sub));
+      } catch (exc) {
+        console.warn(`Laukaisuilmoitus epäonnistui (${launch.name}): ${exc}`);
+      }
+    }
+  }
+  return { subscriptions: subs.length, sent, launches_sent: launchesSent };
 }

@@ -27,7 +27,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 - **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
 - **Revontuli-ilmoitukset**: push-ilmoitus puhelimeen, kun revontuliarvio valitussa paikassa on vähintään käyttäjän valitsemalla rajalla. Worker tarkistaa tilanteen 15 minuutin välein (Cron Trigger) ja säilyttää tilaukset Workers KV:ssä.
-- **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta.
+- **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta sekä linkki laukaisun sivulle, josta löytyy suoratoisto. Suosikkitoimijat (tallennetaan selaimeen) korostetaan, listan voi rajata niihin ja niiden laukaisuista voi saada push-ilmoituksen noin tuntia ennen.
 
 ## Rakenne
 
@@ -41,7 +41,7 @@ worker/
     ovation.ts       # OVATION Prime -revontulimalli (SWPC)
     clouds.ts        # pilvisyysennuste (FMI, varalla Open-Meteo)
     geocode.ts       # paikannimihaku (Open-Meteo Geocoding)
-    push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus
+    push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus (revontulet, laukaisut)
     webpush.ts       # push-viestin salaus (RFC 8291) ja VAPID-tunniste (RFC 8292)
     launches.ts      # RocketLaunch.Live + uudelleenyrityksen odotus
     events.ts        # tapahtumakalenteri: meteoriparvet, pimennykset, konjunktiot
@@ -84,7 +84,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, OVATION-todennäköisyys (`ovation`), revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
 | `GET /api/geocode?q=Rovaniemi` | Paikannimihaku, enintään 5 osumaa |
 | `GET /api/push/key` | Ilmoitusten julkinen VAPID-avain |
-| `POST /api/push/subscribe` | Tallentaa tai päivittää ilmoitustilauksen (`subscription`, `lat`, `lon`, `place`, `threshold`) |
+| `POST /api/push/subscribe` | Tallentaa tai päivittää ilmoitustilauksen (`subscription`, `lat`, `lon`, `place`, `threshold`, valinnainen `launch_providers`) |
 | `POST /api/push/unsubscribe` | Poistaa tilauksen (`endpoint`) |
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
 | `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta |

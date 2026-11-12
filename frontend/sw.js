@@ -59,7 +59,7 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-// Revontuli-ilmoitus palvelimelta (ks. worker/src/push.ts). Ilmoitus näytetään aina, vaikka sisältöä ei saataisi luettua.
+// Revontuli- tai laukaisuilmoitus palvelimelta (ks. worker/src/push.ts). Ilmoitus näytetään aina, vaikka sisältöä ei saataisi luettua.
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -71,7 +71,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title ?? "OmaAvaruus", {
       body: data.body ?? "Revontulia voi olla näkyvissä.",
       icon: "icons/icon-192.png",
-      tag: "aurora",
+      // Sama tunniste korvaa aiemman ilmoituksen: revontulista näkyy vain tuorein, kustakin laukaisusta omansa.
+      tag: data.tag ?? "aurora",
       renotify: true,
     }),
   );

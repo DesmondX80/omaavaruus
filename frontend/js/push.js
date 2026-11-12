@@ -1,8 +1,10 @@
-// Revontuli-ilmoitukset: push-tilauksen teko, päivitys ja poisto. Tilaus koskee paikkaa, joka oli valittuna sitä tehdessä.
+// Ilmoitukset: push-tilauksen teko, päivitys ja poisto. Revontuli-ilmoitukset koskevat paikkaa, joka oli valittuna tilausta tehdessä.
+// Sama tilaus välittää myös suosikkitoimijoiden laukaisuilmoitukset (ks. launches.js).
 import { state, el, json, post, saved } from './core.js';
 import { placeLabel } from './places.js';
 
 const KEY = 'omaavaruus.push';
+export const LAUNCH_KEY = 'omaavaruus.launches';
 const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 // Palvelin tallentaa sijainnin 0,1 asteen tarkkuudella; sama pyöristys kertoo, onko valittu paikka vaihtunut.
 const near = v => Math.round(v * 10) / 10;
@@ -24,6 +26,8 @@ export function renderPush() {
     ? 'Tämä selain ei tue ilmoituksia. iPhonessa ilmoitukset toimivat, kun sovellus on lisätty Koti-valikkoon.'
     : s ? `Ilmoitukset ovat päällä: ${s.place}.`
     : 'Saat ilmoituksen puhelimeen, kun revontulia voi näkyä valitussa paikassa.');
+  // Laukaisukortti näyttää, voiko laukaisuilmoitukset valita.
+  document.dispatchEvent(new Event('pushchange'));
 }
 
 // Ajaa toiminnon niin, että painikkeet ovat sen ajan pois käytöstä ja virhe näkyy tilarivillä.
@@ -38,13 +42,26 @@ function keyBytes(base64url) {
   return Uint8Array.from(binary, c => c.charCodeAt(0));
 }
 
-// Tallentaa tilauksen palvelimelle nykyiselle paikalle ja valitulle rajalle (myös päivitys).
-async function save() {
+// Suosikkitoimijat, joiden laukaisuista käyttäjä on pyytänyt ilmoituksen.
+function launchProviders() {
+  const prefs = saved.get(LAUNCH_KEY, null);
+  return prefs?.notify ? prefs.favorites ?? [] : [];
+}
+
+// Tallentaa tilauksen palvelimelle valitulle rajalle (myös päivitys). Paikaksi tulee nykyinen paikka,
+// paitsi kun keepPlace säilyttää tilauksen aiemman paikan (laukaisuasetusten muutos ei saa siirtää revontuli-ilmoituksia).
+async function save(keepPlace = false) {
+  const where = (keepPlace && settings()) || { lat: state.lat, lon: state.lon, place: placeLabel() };
   const r = await post('/api/push/subscribe', {
-    subscription: subscription.toJSON(), lat: state.lat, lon: state.lon, place: placeLabel(), threshold: el('push-threshold').value,
+    subscription: subscription.toJSON(), lat: where.lat, lon: where.lon, place: where.place, threshold: el('push-threshold').value,
+    launch_providers: launchProviders(),
   });
   saved.set(KEY, { place: r.place, lat: r.lat, lon: r.lon, threshold: r.threshold });
 }
+
+export const pushActive = () => !!(subscription && settings());
+// Vie muuttuneet laukaisuasetukset palvelimelle, jos ilmoitukset ovat käytössä.
+export function syncPush() { if (pushActive()) run(() => save(true)); }
 
 async function enable() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Ilmoitukset on estetty. Salli ne selaimen tai puhelimen asetuksista ja yritä uudelleen.');
@@ -67,9 +84,9 @@ export async function initPush() {
   if (!supported) return;
   el('push-enable').addEventListener('click', () => run(enable, 'Ilmoitukset otettu käyttöön.'));
   el('push-disable').addEventListener('click', () => run(disable, 'Ilmoitukset poistettu käytöstä.'));
-  el('push-move').addEventListener('click', () => run(save));
+  el('push-move').addEventListener('click', () => run(() => save()));
   el('push-test').addEventListener('click', () => run(() => post('/api/push/test', { endpoint: subscription.endpoint }), 'Testi-ilmoitus lähetetty. Sen pitäisi näkyä hetken kuluttua.'));
-  el('push-threshold').addEventListener('change', () => { if (subscription && settings()) run(save); });
+  el('push-threshold').addEventListener('change', () => { if (pushActive()) run(() => save(true)); });
   subscription = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
   renderPush();
 }
