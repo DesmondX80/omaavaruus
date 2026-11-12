@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
+import { parsePlaces } from "../src/geocode";
 import { asRecords } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { moonPhaseName, skyLight } from "../src/sky";
@@ -100,6 +101,12 @@ describe("apufunktiot", () => {
       { time_tag: "2026-11-10T14:00:00.000Z", cloud_cover: 99.5 },
       { time_tag: "2026-11-10T15:00:00.000Z", cloud_cover: 40.5 },
     ]);
+  });
+
+  it("järjestää paikkaehdotukset hakusanan alun ja asukasluvun mukaan", () => {
+    const row = (name: string, population?: number) => ({ name, latitude: 1, longitude: 2, population });
+    const results = [row("Rova"), row("Rovato", 12239), row("Arova", 900000), row("Rovaniemi", 65670), row("Rovate", 965), row("Rovarè", 526), row("Rovale", 79)];
+    expect(parsePlaces({ results }, "rova").map((p) => p.name)).toEqual(["Rovaniemi", "Rovato", "Rovate", "Rovarè", "Rova"]);
   });
 
   it("nimeää kuun vaiheen", () => {

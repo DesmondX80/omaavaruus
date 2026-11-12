@@ -165,25 +165,36 @@ function removePlace(place) {
 function togglePanel(open) {
   el('place-panel').hidden=!open; el('place-toggle').setAttribute('aria-expanded',String(open));
   el('place-toggle').textContent=open?'Sulje':'Vaihda paikka';
-  if(open) el('place-query').focus(); else {el('place-results').replaceChildren(); el('place-status').textContent='';}
+  if(open) el('place-query').focus(); else {clearTimeout(searchTimer); searchSeq++; el('place-results').replaceChildren(); el('place-status').textContent='';}
+}
+// Ehdotukset haetaan kirjoittamisen aikana. Vanhat ehdotukset pysyvät näkyvissä, kunnes uudet saapuvat,
+// ja järjestysnumero estää hitaamman vanhan vastauksen korvaamasta uudempaa.
+let searchSeq=0, searchTimer=null;
+function suggestPlaces(delay) {
+  clearTimeout(searchTimer);
+  const query=el('place-query').value.trim();
+  if(query.length<2) {searchSeq++; el('place-results').replaceChildren(); el('place-status').textContent=''; return;}
+  searchTimer=setTimeout(()=>searchPlaces(query),delay);
 }
 async function searchPlaces(query) {
-  el('place-status').textContent='Haetaan…'; el('place-results').replaceChildren();
+  const seq=++searchSeq;
+  if(!el('place-results').childElementCount) el('place-status').textContent='Haetaan…';
   try {
     const {results}=await json(`/api/geocode?q=${encodeURIComponent(query)}`);
+    if(seq!==searchSeq) return;
     el('place-status').textContent=results.length?'Valitse paikka:':`Paikkaa ”${query}” ei löytynyt.`;
     el('place-results').replaceChildren(...results.filter(validPlace).map(r=>{
       const li=document.createElement('li'), detail=document.createElement('small');
       const pick=button('pick',r.name,()=>{
         const place=state.places.find(p=>samePlace(p,r)) ?? {name:r.name, lat:r.lat, lon:r.lon};
         if(!state.places.includes(place)) {state.places.push(place); saved.set('omaavaruus.places',state.places);}
-        el('place-query').value=''; selectPlace(place);
+        clearTimeout(searchTimer); searchSeq++; el('place-query').value=''; selectPlace(place);
       });
       detail.textContent=[r.region,r.country].filter(Boolean).join(', ');
       if(detail.textContent) pick.append(' ',detail);
       li.append(pick); return li;
     }));
-  } catch(e) {el('place-status').textContent=e.message;}
+  } catch(e) {if(seq===searchSeq) {el('place-results').replaceChildren(); el('place-status').textContent=e.message;}}
 }
 let board=null, stale=false, warning='';
 function render() {
@@ -218,7 +229,8 @@ function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); re
   document.querySelectorAll('[data-info-slot]').forEach(n=>n.append(infoBtn(n.dataset.infoSlot))); clock(); setInterval(clock,1000);
   el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
   el('place-toggle').addEventListener('click',()=>togglePanel(el('place-panel').hidden));
-  el('place-search').addEventListener('submit',e=>{e.preventDefault(); const q=el('place-query').value.trim(); if(q.length>=2) searchPlaces(q);});
+  el('place-search').addEventListener('submit',e=>{e.preventDefault(); suggestPlaces(0);});
+  el('place-query').addEventListener('input',()=>suggestPlaces(250));
   const stored=saved.get('omaavaruus.places',[]);
   state.places=Array.isArray(stored)?stored.filter(validPlace).map(p=>({name:p.name, lat:p.lat, lon:p.lon})):[];
   state.place=state.places[saved.get('omaavaruus.selected',null)] ?? null;
