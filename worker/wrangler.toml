@@ -8,11 +8,21 @@ compatibility_date = "2026-10-01"
 directory = "../frontend"
 run_worker_first = ["/api/*"]
 
+# Revontuli-ilmoitusten tilaukset ja VAPID-avain
+[[kv_namespaces]]
+binding = "SUBSCRIPTIONS"
+
+# Ilmoitusten tarkistus 15 minuutin välein
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
 DEFAULT_LAT = "65.0121"
 DEFAULT_LON = "25.4651"
 DEFAULT_ELEVATION_M = "20"
 DEFAULT_PLACE = "Oulu"
 LAUNCH_LIMIT = "10"
+# VAPID-yhteystieto push-palveluille
+PUSH_SUBJECT = "https://desmondx80.github.io/omaavaruus/"
 # Pilkulla eroteltu lista sallituista origineista (CORS)
 CORS_ORIGINS = "https://desmondx80.github.io,http://localhost:8000,http://localhost:8787"

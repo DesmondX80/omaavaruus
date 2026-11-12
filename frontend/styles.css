@@ -90,6 +90,17 @@ h2 .info-btn { margin-left: 6px; }
 .hour small { height: 14px; font-size: 10px; line-height: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hour[aria-pressed="true"] i { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hour:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.push { margin-top: 14px; }
+.push h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.push-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; }
+.push-controls[hidden] { display: none; }
+.push-controls label { flex-basis: 100%; color: var(--muted); }
+.push-controls button, .push-controls select {
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; cursor: pointer;
+}
+.push-controls #push-enable { border-color: var(--accent); color: var(--accent); }
+.push-controls :disabled { opacity: .5; cursor: default; }
+.push-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #kp-chart { width: 100%; height: auto; margin-top: 10px; }
 .alerts { margin: 10px 0 0; padding-left: 18px; color: var(--warm); font-size: 12px; }
 .alerts li { margin-bottom: 4px; }

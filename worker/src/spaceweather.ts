@@ -41,7 +41,7 @@ export function auroraChance(kp: number, lat: number): string {
   return "Epätodennäköinen";
 }
 
-const CHANCE_LEVELS = ["Epätodennäköinen", "Mahdollinen", "Hyvä", "Erittäin hyvä"];
+export const CHANCE_LEVELS = ["Epätodennäköinen", "Mahdollinen", "Hyvä", "Erittäin hyvä"];
 
 /**
  * Pudottaa geomagneettista arviota pilvisyyden mukaan:

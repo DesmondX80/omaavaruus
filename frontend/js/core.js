@@ -18,6 +18,12 @@ export async function json(path) {
   if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
   return body;
 }
+export async function post(path, data) {
+  const r = await fetch(API + path, {method:'POST', body:JSON.stringify(data), signal:AbortSignal.timeout(45000)});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+  return body;
+}
 // Asetukset tallentuvat tämän selaimen localStorageen.
 export const saved = {
   get(key, fallback) {try {return JSON.parse(localStorage.getItem(key)) ?? fallback;} catch(e) {return fallback;}},

@@ -17,6 +17,7 @@ const SHELL = [
   "js/info.js",
   "js/launches.js",
   "js/places.js",
+  "js/push.js",
   "js/sky.js",
   "js/skychart.js",
   "js/weather.js",
@@ -55,6 +56,35 @@ self.addEventListener("fetch", (event) => {
   } else if (url.origin === self.location.origin) {
     event.respondWith(shellResponse(request));
   }
+});
+
+// Revontuli-ilmoitus palvelimelta (ks. worker/src/push.ts). Ilmoitus näytetään aina, vaikka sisältöä ei saataisi luettua.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data?.json() ?? {};
+  } catch {
+    // Näytetään oletusteksti
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title ?? "OmaAvaruus", {
+      body: data.body ?? "Revontulia voi olla näkyvissä.",
+      icon: "icons/icon-192.png",
+      tag: "aurora",
+      renotify: true,
+    }),
+  );
+});
+
+// Ilmoituksen napautus tuo avoimen sovelluksen esiin tai avaa sen.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => "focus" in client);
+      return open ? open.focus() : self.clients.openWindow("./");
+    }),
+  );
 });
 
 /** Sovelluksen tiedostot: tuore versio verkosta (HTTP-välimuisti tarkistetaan palvelimelta), ilman verkkoa talletettu. */

@@ -50,6 +50,23 @@
         <div id="hours" class="hours"></div>
         <div id="hour-detail" class="muted"></div>
       </div>
+      <div class="push">
+        <h3 class="info-host" data-info-slot="push">Revontuli-ilmoitukset</h3>
+        <div id="push-status" class="muted" role="status"></div>
+        <div id="push-controls" class="push-controls" hidden>
+          <label>Ilmoita, kun arvio on vähintään
+            <select id="push-threshold">
+              <option>Mahdollinen</option>
+              <option selected>Hyvä</option>
+              <option>Erittäin hyvä</option>
+            </select>
+          </label>
+          <button type="button" id="push-enable">Ota ilmoitukset käyttöön</button>
+          <button type="button" id="push-move" hidden></button>
+          <button type="button" id="push-test" hidden>Lähetä testi-ilmoitus</button>
+          <button type="button" id="push-disable" hidden>Poista käytöstä</button>
+        </div>
+      </div>
       <svg id="kp-chart" viewBox="0 0 320 110" role="img" aria-label="Kp-indeksin kehitys"></svg>
       <ul id="alerts" class="alerts"></ul>
     </section>

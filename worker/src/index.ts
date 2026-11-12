@@ -1,10 +1,11 @@
 import { searchPlaces } from "./geocode";
 import { HttpError } from "./http";
 import { getLaunches } from "./launches";
+import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
 import { getSkyChart } from "./sky";
 import { getSpaceWeather } from "./spaceweather";
 
-export interface Env {
+export interface Env extends PushEnv {
   DEFAULT_LAT: string;
   DEFAULT_LON: string;
   DEFAULT_ELEVATION_M: string;
@@ -61,6 +62,8 @@ async function route(url: URL, env: Env): Promise<unknown> {
     }
     case "/api/launches":
       return getLaunches();
+    case "/api/push/key":
+      return pushPublicKey(env);
     case "/api/sky": {
       const at = parseAt(url.searchParams.get("at"));
       try {
@@ -75,24 +78,50 @@ async function route(url: URL, env: Env): Promise<unknown> {
   }
 }
 
+const MAX_BODY_CHARS = 4096;
+
+/** POST-reitit: ilmoitustilausten hallinta. Runko on pieni JSON-objekti. */
+async function post(url: URL, request: Request, env: Env): Promise<unknown> {
+  const actions: Record<string, (env: PushEnv, body: Record<string, unknown>) => Promise<unknown>> = {
+    "/api/push/subscribe": subscribe,
+    "/api/push/unsubscribe": unsubscribe,
+    "/api/push/test": sendTest,
+  };
+  const action = actions[url.pathname];
+  if (!action) throw new HttpError(405, "Method Not Allowed");
+  const text = await request.text();
+  let body: unknown;
+  try {
+    body = text.length <= MAX_BODY_CHARS ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError(422, "Pyynnön rungon pitää olla pieni JSON-objekti.");
+  }
+  return action(env, body as Record<string, unknown>);
+}
+
 function corsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get("Origin");
   const allowed = env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean);
   if (!origin || !allowed.includes(origin)) return {};
-  return { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "GET", Vary: "Origin" };
+  return { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "GET, POST", Vary: "Origin" };
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const cors = corsHeaders(request, env);
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...cors, "Access-Control-Allow-Headers": "*" } });
+      return new Response(null, { status: 204, headers: { ...cors, "Access-Control-Allow-Headers": "Content-Type" } });
     }
-    if (request.method !== "GET") {
+    if (request.method !== "GET" && request.method !== "POST") {
       return Response.json({ detail: "Method Not Allowed" }, { status: 405, headers: cors });
     }
     try {
-      return Response.json(await route(new URL(request.url), env), { headers: cors });
+      const url = new URL(request.url);
+      const result = request.method === "POST" ? await post(url, request, env) : await route(url, env);
+      return Response.json(result, { headers: cors });
     } catch (exc) {
       if (exc instanceof HttpError) {
         return Response.json({ detail: exc.detail }, { status: exc.status, headers: { ...cors, ...exc.headers } });
@@ -100,5 +129,9 @@ export default {
       console.error(exc);
       return Response.json({ detail: `Sisäinen virhe: ${exc}` }, { status: 500, headers: cors });
     }
+  },
+  /** Cron Trigger: tarkistaa revontulitilanteen ja lähettää ilmoitukset. */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(checkSubscriptions(env).then((result) => console.log(`Ilmoitukset: ${JSON.stringify(result)}`)));
   },
 } satisfies ExportedHandler<Env>;

@@ -6,6 +6,7 @@ import { parsePlaces } from "../src/geocode";
 import { asRecords } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { moonPhaseName, skyLight } from "../src/sky";
+import { memoryKv } from "./helpers";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
 const env: Env = {
@@ -15,6 +16,8 @@ const env: Env = {
   DEFAULT_PLACE: "Oulu",
   LAUNCH_LIMIT: "10",
   CORS_ORIGINS: "https://desmondx80.github.io",
+  SUBSCRIPTIONS: memoryKv(),
+  PUSH_SUBJECT: "https://example.test/",
 };
 
 const fmiXml = (rows: [string, string, string][]) =>
