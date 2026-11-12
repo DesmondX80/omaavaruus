@@ -111,7 +111,9 @@ function dataKey(url) {
     const value = Number(url.searchParams.get(name) ?? NaN);
     return Number.isFinite(value) ? value.toFixed(1) : "";
   };
-  return `${url.origin}${url.pathname}?lat=${coord("lat")}&lon=${coord("lon")}`;
+  // Taivaankartan kohteen tiedot ovat kohdekohtaisia, joten nimi kuuluu avaimeen.
+  const name = url.searchParams.get("name");
+  return `${url.origin}${url.pathname}?lat=${coord("lat")}&lon=${coord("lon")}${name ? `&name=${encodeURIComponent(name)}` : ""}`;
 }
 
 async function apiResponse(request, url) {

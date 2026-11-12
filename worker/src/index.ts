@@ -2,7 +2,7 @@ import { searchPlaces } from "./geocode";
 import { HttpError } from "./http";
 import { getLaunches } from "./launches";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
-import { getSkyChart } from "./sky";
+import { getSkyChart, getSkyObject } from "./sky";
 import { getSpaceWeather } from "./spaceweather";
 
 export interface Env extends PushEnv {
@@ -72,6 +72,13 @@ async function route(url: URL, env: Env): Promise<unknown> {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
       }
+    }
+    case "/api/sky/object": {
+      const name = (url.searchParams.get("name") ?? "").trim();
+      const at = parseAt(url.searchParams.get("at"));
+      const object = getSkyObject(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, name);
+      if (!object) throw new HttpError(404, "Kohdetta ei löydy taivaankartalta.");
+      return object;
     }
     default:
       throw new HttpError(404, "Not Found");

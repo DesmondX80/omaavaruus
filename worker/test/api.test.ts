@@ -5,7 +5,8 @@ import { parseFmiSimple } from "../src/clouds";
 import { parsePlaces } from "../src/geocode";
 import { asRecords, clearCache } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
-import { moonPhaseName, skyLight } from "../src/sky";
+import { getSkyObject, moonPhaseName, skyLight } from "../src/sky";
+import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
 import { ovationAt, ovationLevel, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
@@ -184,6 +185,52 @@ describe("reitit", () => {
     expect(body.objects.filter((o: any) => o.kind === "planet")).toHaveLength(7);
     expect(body.objects.find((o: any) => o.name === "Polaris").alt).toBeCloseTo(65, 0);
     expect(body.is_dark).toBe(true);
+  });
+
+  it("palauttaa tähtikuvioiden viivat kartan tähtien niminä", async () => {
+    const body = await (await get("/api/sky?lat=65&lon=25.5&at=2026-01-01T00:00:00")).json<any>();
+    const names = new Set(body.objects.map((o: any) => o.name));
+    const plough = body.constellations.find((c: any) => c.name === "Iso karhu");
+    expect(plough.lines).toContainEqual(["Dubhe", "Merak"]);
+    for (const { lines } of body.constellations) for (const star of lines.flat()) expect(names, star).toContain(star);
+  });
+
+  it("tähtikuvioiden viivat yhdistävät lähekkäisiä tähtiä", () => {
+    const stars = new Map(BRIGHT_STARS.map(([name, ra, dec]) => [name, [(ra * 15 * Math.PI) / 180, (dec * Math.PI) / 180]]));
+    expect(stars.size).toBe(BRIGHT_STARS.length);
+    for (const { name, chains } of CONSTELLATIONS) {
+      for (const chain of chains) {
+        for (let i = 1; i < chain.length; i++) {
+          const [ra1, dec1] = stars.get(chain[i - 1])!;
+          const [ra2, dec2] = stars.get(chain[i])!;
+          const cos = Math.sin(dec1) * Math.sin(dec2) + Math.cos(dec1) * Math.cos(dec2) * Math.cos(ra1 - ra2);
+          const degrees = (Math.acos(Math.min(1, cos)) * 180) / Math.PI;
+          // Kirjoitusvirhe koordinaateissa näkyisi kohtuuttoman pitkänä viivana.
+          expect(degrees, `${name}: ${chain[i - 1]}–${chain[i]}`).toBeLessThan(25);
+        }
+      }
+    }
+  });
+
+  it("laskee kohteen nousun, laskun ja korkeimman kohdan", async () => {
+    const at = new Date("2026-01-01T00:00:00Z");
+    const sirius = getSkyObject(65, 25.5, 20, at, "Sirius")!;
+    expect(sirius).toMatchObject({ kind: "star", constellation: "Iso koira", visibility: "rises", magnitude: -1.44 });
+    // Sirius on etelässä korkeudella 90° − 65° − 16,7° ≈ 8°.
+    expect(sirius.transit_alt).toBeCloseTo(8.3, 0);
+    expect(Date.parse(sirius.rise!)).toBeGreaterThan(at.getTime());
+    expect(Date.parse(sirius.set!)).toBeGreaterThan(at.getTime());
+
+    expect(getSkyObject(65, 25.5, 20, at, "Vega")).toMatchObject({ visibility: "always_up", rise: null, set: null });
+    expect(getSkyObject(65, 25.5, 20, at, "Canopus")).toMatchObject({ visibility: "never_up", rise: null, set: null });
+    // Oulussa Aurinko nousee tammikuun alussa noin klo 10.30 Suomen aikaa (8.30 UTC).
+    const sun = getSkyObject(65, 25.5, 20, at, "Aurinko")!;
+    expect(sun.rise!.slice(0, 13)).toBe("2026-01-01T08");
+    expect(getSkyObject(65, 25.5, 20, at, "Jupiter")!.magnitude).toBeLessThan(-1.5);
+
+    const r = await get("/api/sky/object?lat=65&lon=25.5&at=2026-01-01T00:00:00&name=Kuu");
+    expect((await r.json<any>()).kind).toBe("moon");
+    expect((await get("/api/sky/object?name=Olematon")).status).toBe(404);
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

@@ -10,7 +10,7 @@ const INFO = {
   clouds: ['Pilvisyys', 'Kokonaispilvisyys prosentteina: 0 % on täysin selkeää ja 100 % täysin pilvistä. ± kertoo, kuinka tarkasti laitteesi paikansi sijaintisi metreinä. Pilvisyys yli 30 % heikentää revontuliarviota ja yli 90 % estää näkyvyyden.'],
   wind: ['Aurinkotuuli', 'Auringosta virtaavien sähköisesti varattujen hiukkasten nopeus kilometreinä sekunnissa (km/s). Tavallisesti noin 300–500 km/s. Yli 500–600 km/s tehostaa revontulia, varsinkin jos Bz on negatiivinen.'],
   bz: ['Bz', 'Aurinkotuulen mukana kulkevan magneettikentän pohjois–eteläsuuntainen komponentti. Kun Bz on negatiivinen (etelään päin), energiaa pääsee helpommin maapallon magneettikenttään ja revontulien todennäköisyys kasvaa. Yksikkö nT on nanotesla, magneettikentän voimakkuuden yksikkö.'],
-  sky: ['Asteet', 'Kohteen perässä oleva luku on sen korkeus horisontin yläpuolella asteina: 0° on horisontissa ja 90° suoraan yläpuolella. Listassa näkyvät horisontin yläpuolella olevat Aurinko, Kuu ja planeetat.'],
+  sky: ['Asteet', 'Kohteen perässä oleva luku on sen korkeus horisontin yläpuolella asteina: 0° on horisontissa ja 90° suoraan yläpuolella. Listassa näkyvät horisontin yläpuolella olevat Aurinko, Kuu ja planeetat. Kartan reunalla ovat ilmansuunnat (P pohjoinen, I itä, E etelä, L länsi) ja viivat yhdistävät tähtikuvioiden tähdet. Napauta kohdetta kartalla tai listassa, niin näet sen nousu- ja laskuajan sekä ajan, jolloin se on korkeimmillaan.'],
   launch: ['T− ja LIVE', 'T− tarkoittaa aikaa laukaisuun (T = laukaisuhetki), esimerkiksi T−2 h 5 min. Laukaisuajat tarkentuvat usein viime hetkillä. PÄIVITTYVÄ-merkki kertoo, että lista päivittyy automaattisesti.'],
 };
 export function infoBtn(key) {
