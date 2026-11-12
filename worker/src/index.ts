@@ -3,6 +3,7 @@ import { searchPlaces } from "./geocode";
 import { cached, HttpError, sharedCacheWorks } from "./http";
 import { getLaunches } from "./launches";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
+import { getIss, ISS_NAME, issSkyDetail, issSkyObject } from "./iss";
 import { getOvation, ovationMap } from "./ovation";
 import { getSkyChart, getSkyObject } from "./sky";
 import { getSolarWind } from "./solarwind";
@@ -72,12 +73,17 @@ async function route(url: URL, env: Env): Promise<unknown> {
       return pushPublicKey(env);
     case "/api/sky": {
       const at = parseAt(url.searchParams.get("at"));
+      let chart: ReturnType<typeof getSkyChart>;
       try {
-        return getSkyChart(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, env.DEFAULT_PLACE);
+        chart = getSkyChart(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, env.DEFAULT_PLACE);
       } catch (exc) {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
       }
+      // Avaruusasema lisätään, kun se on horisontin yläpuolella; ratatietojen puuttuminen ei estä karttaa.
+      const iss = await issSkyObject(lat(), lon(), at);
+      if (iss) chart.objects.unshift(iss);
+      return chart;
     }
     case "/api/solarwind":
       return getSolarWind().catch((exc) => {
@@ -91,6 +97,10 @@ async function route(url: URL, env: Env): Promise<unknown> {
           throw new HttpError(503, `Revontulimallin haku epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
         });
     }
+    case "/api/iss":
+      return getIss(lat(), lon()).catch((exc) => {
+        throw new HttpError(503, `ISS:n laskenta epäonnistui: ${exc instanceof HttpError ? `CelesTrak ${exc.detail}` : exc}`);
+      });
     case "/api/events": {
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
       const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
@@ -99,6 +109,11 @@ async function route(url: URL, env: Env): Promise<unknown> {
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();
       const at = parseAt(url.searchParams.get("at"));
+      if (name === ISS_NAME) {
+        return issSkyDetail(lat(), lon(), at).catch((exc) => {
+          throw new HttpError(503, `ISS:n laskenta epäonnistui: ${exc instanceof HttpError ? exc.detail : exc}`);
+        });
+      }
       const object = getSkyObject(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, name);
       if (!object) throw new HttpError(404, "Kohdetta ei löydy taivaankartalta.");
       return object;

@@ -3,7 +3,7 @@
 const R = 170, CX = 200, CY = 200, WIDTH = 400, HEIGHT = 420;
 /** Kuinka kaukaa (kartan yksikköinä) napautus vielä osuu kohteeseen. */
 const HIT_RADIUS = 16;
-const COLORS = { planet: "#ffb547", star: "#e8eefc", sun: "#ffd75e", moon: "#c9d6f0" };
+const COLORS = { planet: "#ffb547", star: "#e8eefc", sun: "#ffd75e", moon: "#c9d6f0", iss: "#5ed6ff" };
 const COMPASS = [["P", 0], ["KO", 45], ["I", 90], ["KA", 135], ["E", 180], ["LO", 225], ["L", 270], ["LU", 315]];
 
 function svgEl(name, attrs, text) {

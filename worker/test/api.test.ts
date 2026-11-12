@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
 import { getEvents } from "../src/events";
+import { findPasses, issPosition, parseTle } from "../src/iss";
+import { ISS_TLE } from "./helpers";
 import { binSolarWind } from "../src/solarwind";
 import { parsePlaces } from "../src/geocode";
 import { asRecords, cached, clearCache, sharedCacheWorks } from "../src/http";
@@ -325,6 +327,47 @@ describe("reitit", () => {
   it("ei käytä jaettua välimuistia, jos sitä ei ole", async () => {
     expect(await sharedCacheWorks()).toBe(false);
     expect(await cached("jaettu-ei", 60, async () => 5, true)).toBe(5);
+  });
+
+  it("laskee ISS:n sijainnin ja ylilennot", async () => {
+    const tle = parseTle(ISS_TLE);
+    expect(tle.epoch).toBe("2026-11-12T10:22:57.431Z");
+    const position = issPosition(tle, 60.17, 24.94, new Date("2026-11-12T22:30:00Z"));
+    expect(position.height_km).toBeGreaterThan(400);
+    expect(position.height_km).toBeLessThan(450);
+    expect(Math.abs(position.lat)).toBeLessThanOrEqual(52);
+
+    const passes = findPasses(tle, 60.17, 24.94, new Date("2026-11-12T22:30:00Z"));
+    expect(passes.length).toBeGreaterThan(10);
+    for (const p of passes) {
+      expect(Date.parse(p.start)).toBeLessThan(Date.parse(p.max));
+      expect(Date.parse(p.max)).toBeLessThan(Date.parse(p.end));
+      // 60° leveydellä asema ei nouse yli 20°: rata ulottuu vain 51,6° leveydelle.
+      expect(p.max_alt).toBeLessThanOrEqual(20);
+    }
+    const visible = passes.find((p) => p.visible_start?.startsWith("2026-11-16T16:5"));
+    expect(visible).toBeDefined();
+    expect(visible!.magnitude).toBeLessThan(0);
+    // Oulussa asema jää matalalle etelätaivaalle.
+    const oulu = findPasses(tle, 65.01, 25.47, new Date("2026-11-12T22:30:00Z"));
+    expect(oulu.length).toBeGreaterThan(5);
+    expect(Math.max(...oulu.map((p) => p.max_alt))).toBeLessThan(10);
+    expect(oulu.every((p) => p.max_az > 120 && p.max_az < 240)).toBe(true);
+  });
+
+  it("palauttaa ISS-reitin ja lisää aseman taivaankartalle", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T16:52:00Z"));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(ISS_TLE)));
+    const body = await (await get("/api/iss?lat=60.17&lon=24.94")).json<any>();
+    expect(body.position.alt).toBeGreaterThan(5);
+    expect(body.passes[0].visible_start).toBeTruthy();
+    const chart = await (await get("/api/sky?lat=60.17&lon=24.94")).json<any>();
+    expect(chart.objects[0]).toMatchObject({ name: "ISS", kind: "iss" });
+    const detail = await (await get("/api/sky/object?lat=60.17&lon=24.94&name=ISS")).json<any>();
+    expect(detail).toMatchObject({ kind: "iss", visibility: "rises" });
+    expect(Date.parse(detail.rise)).toBeLessThan(Date.now());
+    vi.useRealTimers();
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

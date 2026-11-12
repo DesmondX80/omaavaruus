@@ -1,0 +1,282 @@
+/**
+ * Kansainvälinen avaruusasema: nykyinen sijainti ja näkyvät ylilennot havaintopaikalta.
+ * Ratatiedot (TLE) CelesTrakista, rata lasketaan SGP4-mallilla (satellite.js).
+ */
+import {
+  degreesLat,
+  degreesLong,
+  ecfToLookAngles,
+  eciToEcf,
+  eciToGeodetic,
+  gstime,
+  jday,
+  propagate,
+  shadowFraction,
+  sunPos,
+  twoline2satrec,
+  type SatRec,
+} from "satellite.js";
+import { Body, Equator, Horizon, MakeTime, Observer } from "astronomy-engine";
+
+import { cached, fetchText } from "./http";
+
+const TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE";
+/** CelesTrak päivittää ratatiedot muutaman kerran vuorokaudessa ja pyytää, ettei samaa hakua tehdä tiheämmin kuin kahden tunnin välein. */
+const TLE_TTL_S = 4 * 3600;
+/** Tätä vanhempi ratatieto ei enää kelpaa: asema tekee ratakorjauksia, ja ennusteen virhe kasvaa päivien mittaan. */
+const TLE_MAX_AGE_MS = 7 * 24 * 3_600_000;
+const PASSES_TTL_S = 1800;
+
+const MIN = 60_000;
+/**
+ * Ylilento lasketaan alkavaksi ja päättyväksi tällä korkeudella; matalammalla asema hukkuu horisontin utuun.
+ * Tavallinen raja on 10°, mutta asema kiertää enintään 51,6° leveydellä, eikä Pohjois-Suomessa nouse niin korkealle.
+ */
+const MIN_ELEVATION = 5;
+/** Asema näkyy vain, kun taivas on hämärä tai pimeä: Aurinko vähintään tämän verran horisontin alla. */
+const MAX_SUN_ALT = -6;
+const SEARCH_DAYS = 5;
+/** Karkean haun askel: matalinkin näkyvä ylilento kestää yli kaksi minuuttia korkeuden 10° yläpuolella. */
+const STEP_MS = MIN;
+
+export interface Tle {
+  name: string;
+  line1: string;
+  line2: string;
+  epoch: string;
+}
+
+export function parseTle(text: string): Tle {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const i = lines.findIndex((line) => line.startsWith("1 "));
+  if (i < 0 || !lines[i + 1]?.startsWith("2 ")) throw new Error("Ratatietojen (TLE) muoto on tuntematon");
+  const satrec = twoline2satrec(lines[i], lines[i + 1]);
+  if (satrec.error) throw new Error(`Ratatiedot (TLE) eivät kelpaa (virhe ${satrec.error})`);
+  // Epookki: vuoden kaksi viimeistä numeroa ja vuoden päivä desimaaleineen.
+  const year = 2000 + satrec.epochyr;
+  const epoch = new Date(Date.UTC(year, 0, 1) + (satrec.epochdays - 1) * 86_400_000);
+  return { name: lines[i - 1] ?? "ISS", line1: lines[i], line2: lines[i + 1], epoch: epoch.toISOString() };
+}
+
+export async function getTle(now = new Date()): Promise<Tle> {
+  const tle = await cached("iss-tle", TLE_TTL_S, async () => parseTle(await fetchText(TLE_URL, TLE_TTL_S, "text/plain")), true);
+  if (now.getTime() - Date.parse(tle.epoch) > TLE_MAX_AGE_MS) throw new Error(`ISS:n ratatiedot ovat vanhentuneet (${tle.epoch})`);
+  return tle;
+}
+
+interface State {
+  time: number;
+  /** Korkeus horisontista ja atsimuutti asteina, etäisyys kilometreinä. */
+  alt: number;
+  az: number;
+  range: number;
+  lat: number;
+  lon: number;
+  height: number;
+  sunlit: boolean;
+}
+
+const deg = (rad: number) => (rad * 180) / Math.PI;
+const round = (value: number, digits = 0) => Math.round(value * 10 ** digits) / 10 ** digits;
+
+class Tracker {
+  private readonly satrec: SatRec;
+  private readonly site;
+
+  constructor(tle: Tle, lat: number, lon: number, heightKm = 0) {
+    this.satrec = twoline2satrec(tle.line1, tle.line2);
+    this.site = { latitude: (lat * Math.PI) / 180, longitude: (lon * Math.PI) / 180, height: heightKm };
+  }
+
+  state(time: number): State | null {
+    const date = new Date(time);
+    const pv = propagate(this.satrec, date);
+    if (!pv) return null;
+    const gmst = gstime(date);
+    const look = ecfToLookAngles(this.site, eciToEcf(pv.position, gmst));
+    const geo = eciToGeodetic(pv.position, gmst);
+    return {
+      time,
+      alt: deg(look.elevation),
+      az: (deg(look.azimuth) + 360) % 360,
+      range: look.rangeSat,
+      lat: degreesLat(geo.latitude),
+      lon: degreesLong(geo.longitude),
+      height: geo.height,
+      // Asema loistaa vain auringonvalossa: Maan varjossa se katoaa näkyvistä kesken ylilennon.
+      sunlit: shadowFraction(sunPos(jday(date)).rsun, pv.position) < 0.5,
+    };
+  }
+
+  /** Hetki, jolla korkeus ylittää (tai alittaa) rajan välillä [a, b]; puolitushaku sekunnin tarkkuuteen. */
+  crossing(a: number, b: number, limit: number): number {
+    const above = (t: number) => (this.state(t)?.alt ?? -90) >= limit;
+    const rising = !above(a);
+    while (b - a > 1000) {
+      const mid = (a + b) / 2;
+      if (above(mid) === rising) b = mid;
+      else a = mid;
+    }
+    return (a + b) / 2;
+  }
+}
+
+function sunAltitude(observer: Observer, time: number): number {
+  const t = MakeTime(new Date(time));
+  const eq = Equator(Body.Sun, t, observer, true, true);
+  return Horizon(t, observer, eq.ra, eq.dec).altitude;
+}
+
+/** Arvioitu kirkkaus: perusmagnitudi 1000 km etäisyydellä puolittain valaistuna ja vaihekulman vaikutus (Lambertin pallo). */
+function magnitude(state: State, observer: Observer): number {
+  const date = new Date(state.time);
+  // Vaihekulma havaitsijan taivaalta: Aurinko on niin kaukana, että suunta siihen on asemalta katsottuna sama.
+  const sunAlt = sunAltitude(observer, state.time);
+  const t = MakeTime(date);
+  const eq = Equator(Body.Sun, t, observer, true, true);
+  const sunAz = Horizon(t, observer, eq.ra, eq.dec).azimuth;
+  const toVec = (alt: number, az: number) => {
+    const a = (alt * Math.PI) / 180, z = (az * Math.PI) / 180;
+    return [Math.cos(a) * Math.sin(z), Math.cos(a) * Math.cos(z), Math.sin(a)];
+  };
+  const toSat = toVec(state.alt, state.az), toSun = toVec(sunAlt, sunAz);
+  const cosElong = toSat[0] * toSun[0] + toSat[1] * toSun[1] + toSat[2] * toSun[2];
+  // Vaihekulma on 180° miinus kulmaetäisyys Auringosta, kun Aurinko on asemaa paljon kauempana.
+  const phase = Math.PI - Math.acos(Math.max(-1, Math.min(1, cosElong)));
+  const lambert = (Math.sin(phase) + (Math.PI - phase) * Math.cos(phase)) / Math.PI;
+  return round(-1.8 + 5 * Math.log10(state.range / 1000) - 2.5 * Math.log10(Math.max(lambert, 1e-3) / 0.318), 1);
+}
+
+export interface Pass {
+  start: string;
+  start_az: number;
+  max: string;
+  max_alt: number;
+  max_az: number;
+  end: string;
+  end_az: number;
+  /** Näkyvän osuuden alku ja loppu: asema on auringonvalossa ja taivas hämärä tai pimeä. null, jos ei näy lainkaan. */
+  visible_start: string | null;
+  visible_end: string | null;
+  magnitude: number | null;
+}
+
+/** Ylilennot, joilla asema nousee vähintään MIN_ELEVATION korkeudelle; näkyvät on merkitty. */
+export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days = SEARCH_DAYS): Pass[] {
+  const tracker = new Tracker(tle, lat, lon);
+  const observer = new Observer(lat, lon, 0);
+  const passes: Pass[] = [];
+  const end = from.getTime() + days * 86_400_000;
+  let prev = tracker.state(from.getTime());
+  for (let t = from.getTime() + STEP_MS; t <= end && prev; t += STEP_MS) {
+    const cur = tracker.state(t);
+    if (!cur) break;
+    if (prev.alt < MIN_ELEVATION && cur.alt >= MIN_ELEVATION) {
+      const startTime = tracker.crossing(t - STEP_MS, t, MIN_ELEVATION);
+      // Seurataan ylilento loppuun 10 sekunnin välein: tarkkuus riittää korkeimmalle kohdalle ja näkyvyydelle.
+      // Seuranta alkaa karkean haun näytteestä, joka on varmasti rajan yläpuolella.
+      let best: State = cur;
+      let visibleStart: number | null = null, visibleEnd: number | null = null, brightest: number | null = null;
+      let s = t;
+      let state: State | null = cur;
+      while (state && state.alt >= MIN_ELEVATION) {
+        if (state.alt > best.alt) best = state;
+        if (state.sunlit && sunAltitude(observer, s) <= MAX_SUN_ALT) {
+          visibleStart ??= s;
+          visibleEnd = s;
+          const mag = magnitude(state, observer);
+          brightest = brightest === null ? mag : Math.min(brightest, mag);
+        }
+        s += 10_000;
+        state = tracker.state(s);
+      }
+      const endTime = tracker.crossing(s - 10_000, s, MIN_ELEVATION);
+      const iso = (time: number) => new Date(time).toISOString();
+      passes.push({
+        start: iso(startTime),
+        start_az: round(tracker.state(startTime)!.az),
+        max: iso(best.time),
+        max_alt: round(best.alt),
+        max_az: round(best.az),
+        end: iso(endTime),
+        end_az: round(tracker.state(endTime)!.az),
+        visible_start: visibleStart === null ? null : iso(visibleStart),
+        visible_end: visibleEnd === null ? null : iso(visibleEnd),
+        magnitude: brightest,
+      });
+      t = Math.ceil(s / STEP_MS) * STEP_MS;
+      prev = tracker.state(t);
+      continue;
+    }
+    prev = cur;
+  }
+  return passes;
+}
+
+/** Aseman sijainti ja näkyvyys havaitsijalta hetkellä `at`. */
+export function issPosition(tle: Tle, lat: number, lon: number, at: Date) {
+  const state = new Tracker(tle, lat, lon).state(at.getTime());
+  if (!state) throw new Error("ISS:n paikan laskenta epäonnistui");
+  return {
+    at: at.toISOString(),
+    lat: round(state.lat, 2),
+    lon: round(state.lon, 2),
+    height_km: round(state.height),
+    alt: round(state.alt, 1),
+    az: round(state.az, 1),
+    range_km: round(state.range),
+    sunlit: state.sunlit,
+  };
+}
+
+/** Nimi, jolla asema näkyy taivaankartalla. */
+export const ISS_NAME = "ISS";
+
+/** Asema taivaankartan kohteena, kun se on horisontin yläpuolella. Ratatietojen puuttuessa null. */
+export async function issSkyObject(lat: number, lon: number, at: Date) {
+  try {
+    const p = issPosition(await getTle(), lat, lon, at);
+    return p.alt > 0 ? { name: ISS_NAME, kind: "iss" as const, alt: p.alt, az: p.az, magnitude: null, extra: null } : null;
+  } catch (exc) {
+    console.warn(`ISS taivaankartalle epäonnistui: ${exc}`);
+    return null;
+  }
+}
+
+/** Taivaankartan kohdetiedot asemalle samassa muodossa kuin muille kohteille: nousu ja lasku ovat seuraavan ylilennon. */
+export async function issSkyDetail(lat: number, lon: number, at: Date) {
+  const tle = await getTle();
+  const p = issPosition(tle, lat, lon, at);
+  // Käynnissä oleva ylilento löytyy, kun hakua aloitetaan vähän ennen hetkeä.
+  const next = findPasses(tle, lat, lon, new Date(at.getTime() - 15 * MIN), 2).find((pass) => Date.parse(pass.end) > at.getTime());
+  return {
+    name: ISS_NAME,
+    kind: "iss",
+    at: at.toISOString(),
+    alt: p.alt,
+    az: p.az,
+    magnitude: null,
+    constellation: null,
+    rise: next?.start ?? null,
+    set: next?.end ?? null,
+    transit: next?.max ?? null,
+    transit_alt: next?.max_alt ?? null,
+    visibility: next ? "rises" : "never_up",
+    height_km: p.height_km,
+    sunlit: p.sunlit,
+  };
+}
+
+/** ISS-kortin tiedot: sijainti nyt ja näkyvät ylilennot seuraavien päivien ajalta. */
+export async function getIss(lat: number, lon: number, now = new Date()) {
+  const tle = await getTle(now);
+  // Ylilennot ovat samat noin kymmenen kilometrin säteellä; pyöristys jakaa välimuistin lähekkäisille paikoille.
+  const la = round(lat, 1), lo = round(lon, 1);
+  const slot = Math.floor(now.getTime() / (PASSES_TTL_S * 1000));
+  const passes = await cached(`iss-passes:${la}:${lo}:${tle.epoch}:${slot}`, PASSES_TTL_S, async () => findPasses(tle, la, lo, new Date(slot * PASSES_TTL_S * 1000)), true);
+  return {
+    tle_epoch: tle.epoch,
+    position: issPosition(tle, lat, lon, now),
+    passes: passes.filter((p) => Date.parse(p.end) > now.getTime()),
+  };
+}

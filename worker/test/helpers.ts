@@ -15,3 +15,9 @@ export function memoryKv(): KVNamespace & { data: Map<string, string> } {
     }),
   } as unknown as KVNamespace & { data: Map<string, string> };
 }
+
+/** ISS:n ratatiedot 12.11.2026 (CelesTrak): ylilentotestit laskevat näistä toistettavasti. */
+export const ISS_TLE = `ISS (ZARYA)
+1 25544U 98067A   26316.43260916  .00008191  00000+0  15481-3 0  9999
+2 25544  51.6324 286.4897 0007327  17.4271 342.6968 15.49332729594739
+`;

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
 import { resetLaunchState } from "../src/launches";
-import { checkSubscriptions, launchesToNotify, shouldNotify, type Subscription } from "../src/push";
+import { checkSubscriptions, launchesToNotify, passesToNotify, shouldNotify, type Subscription } from "../src/push";
+import { ISS_TLE } from "./helpers";
 import { b64urlEncode } from "../src/webpush";
 import { memoryKv } from "./helpers";
 
@@ -53,6 +54,7 @@ beforeEach(async () => {
         pushCalls.push({ url, headers: new Headers(init?.headers), bytes: (init?.body as Uint8Array).length });
         return new Response("", { status: pushStatus });
       }
+      if (url.startsWith("https://celestrak.org/")) return new Response(ISS_TLE);
       if (url.startsWith("https://fdo.rocketlaunch.live/")) {
         return Response.json({
           result: [
@@ -89,7 +91,7 @@ describe("ilmoitustilaukset", () => {
   it("tallentaa tilauksen sijainnin 0,1 asteen tarkkuudella ja päivittää sen", async () => {
     const r = await post("/api/push/subscribe", subscribeBody());
     expect(r.status).toBe(200);
-    expect(stored()).toEqual([{ endpoint: ENDPOINT, keys: browserKeys, lat: 65, lon: 25.5, place: "Oulu", threshold: "Hyvä", launch_providers: [] }]);
+    expect(stored()).toEqual([{ endpoint: ENDPOINT, keys: browserKeys, lat: 65, lon: 25.5, place: "Oulu", threshold: "Hyvä", launch_providers: [], iss: false }]);
     await post("/api/push/subscribe", subscribeBody({ place: "Rovaniemi", lat: 66.49897, lon: 25.68867, threshold: "Mahdollinen" }));
     expect(stored()).toHaveLength(1);
     expect(stored()[0]).toMatchObject({ lat: 66.5, lon: 25.7, place: "Rovaniemi", threshold: "Mahdollinen" });
@@ -138,24 +140,24 @@ describe("ilmoitusten ajastettu tarkistus", () => {
 
   it("lähettää ilmoituksen kerran ja muistaa sen", async () => {
     await post("/api/push/subscribe", subscribeBody());
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 1, launches_sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 1, launches_sent: 0, iss_sent: 0 });
     expect(pushCalls).toHaveLength(1);
     expect(stored()[0].last).toEqual({ at: "2026-11-08T23:30:00.000Z", level: 3 });
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0, iss_sent: 0 });
     expect(pushCalls).toHaveLength(1);
   });
 
   it("ei ilmoita rajan alapuolella", async () => {
     // Leveysasteella 60 sama Kp antaa vain arvion "Mahdollinen".
     await post("/api/push/subscribe", subscribeBody({ lat: 60, threshold: "Erittäin hyvä" }));
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0, iss_sent: 0 });
     expect(pushCalls).toEqual([]);
   });
 
   it("poistaa tilauksen, jonka push-palvelu ilmoittaa lakanneen", async () => {
     await post("/api/push/subscribe", subscribeBody());
     pushStatus = 410;
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 0, iss_sent: 0 });
     expect(stored()).toEqual([]);
   });
 
@@ -173,13 +175,31 @@ describe("ilmoitusten ajastettu tarkistus", () => {
 
   it("ilmoittaa suosikkitoimijan laukaisusta kerran", async () => {
     await post("/api/push/subscribe", subscribeBody({ threshold: "Erittäin hyvä", lat: 60, launch_providers: ["SpaceX"] }));
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1, iss_sent: 0 });
     expect(stored()[0].launches_notified).toEqual(["1@2026-11-09"]);
     // Asetusten päivitys ei unohda jo ilmoitettuja laukaisuja.
     await post("/api/push/subscribe", subscribeBody({ threshold: "Erittäin hyvä", lat: 60, launch_providers: ["SpaceX", "Rocket Lab"] }));
-    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1 });
+    expect(await checkSubscriptions(env)).toEqual({ subscriptions: 1, sent: 0, launches_sent: 1, iss_sent: 0 });
     expect(stored()[0].launches_notified).toEqual(["1@2026-11-09", "2@2026-11-09"]);
     expect(pushCalls).toHaveLength(2);
+  });
+
+  it("valitsee ilmoitettaviksi pian alkavat näkyvät ylilennot", () => {
+    const now = Date.parse("2026-11-16T16:40:00Z");
+    const pass = (visible_start: string | null) => ({ visible_start }) as any;
+    const passes = [pass("2026-11-16T16:51:00.000Z"), pass("2026-11-16T17:10:00.000Z"), pass(null)];
+    expect(passesToNotify({}, passes, now)).toEqual([passes[0]]);
+    expect(passesToNotify({ iss_notified: ["2026-11-16T16:51:00.000Z"] }, passes, now)).toEqual([]);
+  });
+
+  it("ilmoittaa näkyvästä ISS-ylilennosta kerran", async () => {
+    // Helsingissä näkyvä ylilento alkaa 16.11. klo 16.51 UTC (ks. iss-testit).
+    vi.setSystemTime(new Date("2026-11-16T16:40:00Z"));
+    await post("/api/push/subscribe", subscribeBody({ lat: 60.17, lon: 24.94, place: "Helsinki", threshold: "Erittäin hyvä", iss: true }));
+    const result = await checkSubscriptions(env);
+    expect(result.iss_sent).toBe(1);
+    expect(stored()[0].iss_notified).toHaveLength(1);
+    expect((await checkSubscriptions(env)).iss_sent).toBe(0);
   });
 
   it("hylkää virheellisen suosikkilistan", async () => {

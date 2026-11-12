@@ -3,7 +3,7 @@ import { state, el, json, fmt, hhmm, num, button } from './core.js';
 import { placeLabel } from './places.js';
 import { drawSky, objectAt } from './skychart.js';
 
-const KINDS = {star:'tähti', planet:'planeetta'};
+const KINDS = {star:'tähti', planet:'planeetta', iss:'avaruusasema'};
 const DIRECTIONS = ['pohjoinen','koillinen','itä','kaakko','etelä','lounas','länsi','luode'];
 const direction = az => DIRECTIONS[Math.round(az/45)%8];
 // Valittu kohde säilyy, kun kartta piirretään uudelleen (ajan siirto, minuutin välein tehtävä päivitys).
@@ -23,6 +23,12 @@ function renderDetail(o) {
   const facts=line(KINDS[o.kind], o.constellation, o.magnitude===null ? null : `${num(o.magnitude,1)} mag`);
   facts.className='muted';
   const position=line(o.alt>=0 ? `Korkeus ${num(o.alt)}°` : `Horisontin alla (${num(o.alt)}°)`, `suunta ${num(o.az)}° (${direction(o.az)})`);
+  if(o.kind==='iss') {
+    // Asemalle näytetään käynnissä oleva tai seuraava ylilento (nousu ja lasku 5° korkeudella).
+    const pass = o.rise ? line(`ylilento ${when(o.rise,o.at)}–${hhmm(o.set)}`, `korkeimmillaan ${num(o.transit_alt)}°`) : line('Ei ylilentoja kahden vuorokauden aikana');
+    el('sky-detail').replaceChildren(title, line('avaruusasema', `${num(o.height_km)} km korkeudella`, o.sunlit ? 'auringonvalossa' : 'Maan varjossa'), position, pass, button('link-btn','Sulje',()=>select(null)));
+    el('sky-detail').hidden=false; return;
+  }
   const highest=[o.transit, `korkeimmillaan ${when(o.transit,o.at)} (${num(o.transit_alt)}°)`];
   // Tapahtumat aikajärjestyksessä: horisontin yläpuolella oleva kohde laskee ennen seuraavaa nousuaan.
   const upcoming=[o.rise && [o.rise, `nousee ${when(o.rise,o.at)}`], highest, o.set && [o.set, `laskee ${when(o.set,o.at)}`]]

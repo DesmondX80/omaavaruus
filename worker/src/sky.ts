@@ -39,7 +39,7 @@ const MOON_PHASES: [number, string][] = [
 
 interface SkyObject {
   name: string;
-  kind: "star" | "planet" | "sun" | "moon";
+  kind: "star" | "planet" | "sun" | "moon" | "iss";
   alt: number;
   az: number;
   magnitude: number | null;

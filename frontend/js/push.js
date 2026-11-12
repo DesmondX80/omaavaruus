@@ -1,5 +1,5 @@
 // Ilmoitukset: push-tilauksen teko, päivitys ja poisto. Revontuli-ilmoitukset koskevat paikkaa, joka oli valittuna tilausta tehdessä.
-// Sama tilaus välittää myös suosikkitoimijoiden laukaisuilmoitukset (ks. launches.js).
+// Sama tilaus välittää myös suosikkitoimijoiden laukaisuilmoitukset (launches.js) ja ISS-ylilennot (iss.js).
 import { state, el, json, post, saved } from './core.js';
 import { placeLabel } from './places.js';
 
@@ -42,6 +42,8 @@ function keyBytes(base64url) {
   return Uint8Array.from(binary, c => c.charCodeAt(0));
 }
 
+export const ISS_KEY = 'omaavaruus.iss';
+
 // Suosikkitoimijat, joiden laukaisuista käyttäjä on pyytänyt ilmoituksen.
 function launchProviders() {
   const prefs = saved.get(LAUNCH_KEY, null);
@@ -54,13 +56,13 @@ async function save(keepPlace = false) {
   const where = (keepPlace && settings()) || { lat: state.lat, lon: state.lon, place: placeLabel() };
   const r = await post('/api/push/subscribe', {
     subscription: subscription.toJSON(), lat: where.lat, lon: where.lon, place: where.place, threshold: el('push-threshold').value,
-    launch_providers: launchProviders(),
+    launch_providers: launchProviders(), iss: saved.get(ISS_KEY, {}).notify === true,
   });
   saved.set(KEY, { place: r.place, lat: r.lat, lon: r.lon, threshold: r.threshold });
 }
 
 export const pushActive = () => !!(subscription && settings());
-// Vie muuttuneet laukaisuasetukset palvelimelle, jos ilmoitukset ovat käytössä.
+// Vie muuttuneet laukaisu- tai ISS-asetukset palvelimelle, jos ilmoitukset ovat käytössä.
 export function syncPush() { if (pushActive()) run(() => save(true)); }
 
 async function enable() {

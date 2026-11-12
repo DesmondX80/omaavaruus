@@ -1,5 +1,6 @@
 /** Revontuli- ja laukaisuilmoitukset: tilausten tallennus Workers KV:hen ja ajastettu tarkistus, joka lähettää push-viestit. */
 import { HttpError } from "./http";
+import { findPasses, getTle, type Pass } from "./iss";
 import { getLaunches, type Launch } from "./launches";
 import { CHANCE_LEVELS, getSpaceWeather } from "./spaceweather";
 import { generateVapidKeys, sendPush, type PushTarget, type VapidKeys } from "./webpush";
@@ -22,6 +23,10 @@ export interface Subscription extends PushTarget {
   launch_providers?: string[];
   /** Laukaisut, joista on jo ilmoitettu (ks. launchKey). */
   launches_notified?: string[];
+  /** Ilmoitetaanko näkyvistä ISS-ylilennoista tilauksen paikassa. */
+  iss?: boolean;
+  /** Ylilennot, joista on jo ilmoitettu (näkyvän osuuden alku). */
+  iss_notified?: string[];
 }
 
 /** Sallitut push-palvelut: Worker ei lähetä pyyntöjä mielivaltaisiin osoitteisiin. */
@@ -35,6 +40,9 @@ const LAUNCH_LEAD_MS = 3_600_000;
 const MAX_PROVIDERS = 20;
 /** Kuinka monta ilmoitettua laukaisua tilaus muistaa; lista seuraavista laukaisuista on tätä lyhyempi. */
 const MAX_NOTIFIED = 20;
+/** Näkyvästä ISS-ylilennosta ilmoitetaan, kun sen alkuun on enintään tämän verran (cron ajetaan 15 minuutin välein). */
+const ISS_LEAD_MS = 20 * 60_000;
+const ISS_DIRECTIONS = ["pohjoisesta", "koillisesta", "idästä", "kaakosta", "etelästä", "lounaasta", "lännestä", "luoteesta"];
 /** Revontulitilanne vanhenee nopeasti: push-palvelu saa yrittää toimitusta tunnin. */
 const TTL_S = 3600;
 
@@ -103,6 +111,7 @@ function parseSubscription(body: Record<string, unknown>): Subscription {
     place: place || "valittu paikka",
     threshold,
     launch_providers: [...new Set(providers as string[])],
+    iss: body.iss === true,
   };
 }
 
@@ -110,10 +119,10 @@ function parseSubscription(body: Record<string, unknown>): Subscription {
 export async function subscribe(env: PushEnv, body: Record<string, unknown>) {
   const sub = parseSubscription(body);
   const key = await subscriptionKey(sub.endpoint);
-  // Jo ilmoitetut laukaisut säilyvät, jottei asetusten muutos toista ilmoitusta.
-  const launches_notified = (await env.SUBSCRIPTIONS.get<Subscription>(key, "json"))?.launches_notified;
-  await env.SUBSCRIPTIONS.put(key, JSON.stringify({ ...sub, launches_notified }));
-  return { ok: true, place: sub.place, lat: sub.lat, lon: sub.lon, threshold: sub.threshold, launch_providers: sub.launch_providers };
+  // Jo ilmoitetut laukaisut ja ylilennot säilyvät, jottei asetusten muutos toista ilmoitusta.
+  const previous = await env.SUBSCRIPTIONS.get<Subscription>(key, "json");
+  await env.SUBSCRIPTIONS.put(key, JSON.stringify({ ...sub, launches_notified: previous?.launches_notified, iss_notified: previous?.iss_notified }));
+  return { ok: true, place: sub.place, lat: sub.lat, lon: sub.lon, threshold: sub.threshold, launch_providers: sub.launch_providers, iss: sub.iss };
 }
 
 export async function unsubscribe(env: PushEnv, body: Record<string, unknown>) {
@@ -157,6 +166,14 @@ export function launchesToNotify(sub: Pick<Subscription, "launch_providers" | "l
   return launches.filter((launch) => {
     const lead = launch.net ? Date.parse(launch.net) - now : NaN;
     return lead > 0 && lead <= LAUNCH_LEAD_MS && !!sub.launch_providers?.includes(launch.provider) && !sub.launches_notified?.includes(launchKey(launch));
+  });
+}
+
+/** Näkyvät ylilennot, joiden näkyvä osuus alkaa ISS_LEAD_MS kuluessa ja joista ei ole vielä ilmoitettu. */
+export function passesToNotify(sub: Pick<Subscription, "iss_notified">, passes: Pass[], now: number): Pass[] {
+  return passes.filter((pass) => {
+    const lead = pass.visible_start ? Date.parse(pass.visible_start) - now : NaN;
+    return lead > 0 && lead <= ISS_LEAD_MS && !sub.iss_notified?.includes(pass.visible_start!);
   });
 }
 
@@ -225,5 +242,33 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
       }
     }
   }
-  return { subscriptions: subs.length, sent, launches_sent: launchesSent };
+
+  let issSent = 0;
+  const watchers = subs.filter(([, sub]) => sub.iss);
+  const tle = watchers.length ? await getTle(now).catch((exc) => console.warn(`ISS:n ratatiedot puuttuvat: ${exc}`)) : undefined;
+  // Samassa paikassa olevat tilaukset jakavat ylilentolaskennan.
+  const passesAt = new Map<string, Pass[]>();
+  for (const [key, sub] of tle ? watchers : []) {
+    const place = `${sub.lat},${sub.lon}`;
+    try {
+      // Haku alkaa vähän ennen nykyhetkeä: ylilento voi tulla näkyväksi vasta, kun se on jo käynnissä.
+      if (!passesAt.has(place)) passesAt.set(place, findPasses(tle!, sub.lat, sub.lon, new Date(now.getTime() - 15 * 60_000), 1.25 / 24));
+      for (const pass of passesToNotify(sub, passesAt.get(place)!, now.getTime())) {
+        const minutes = Math.round((Date.parse(pass.visible_start!) - now.getTime()) / 60_000);
+        const from = ISS_DIRECTIONS[Math.round(pass.start_az / 45) % 8];
+        const ok = await deliver(env, key, sub, {
+          title: `ISS näkyy noin ${minutes} min kuluttua – ${sub.place}`,
+          body: `Asema nousee ${from} ja käy ${pass.max_alt}° korkeudella.${pass.magnitude === null ? "" : ` Kirkkaus noin ${pass.magnitude.toLocaleString("fi-FI")} mag.`}`,
+          tag: `iss-${pass.visible_start}`,
+        });
+        if (!ok) continue;
+        issSent++;
+        sub.iss_notified = [...(sub.iss_notified ?? []), pass.visible_start!].slice(-MAX_NOTIFIED);
+        await env.SUBSCRIPTIONS.put(key, JSON.stringify(sub));
+      }
+    } catch (exc) {
+      console.warn(`ISS-ilmoituksen tarkistus epäonnistui (${place}): ${exc}`);
+    }
+  }
+  return { subscriptions: subs.length, sent, launches_sent: launchesSent, iss_sent: issSent };
 }
