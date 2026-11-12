@@ -41,6 +41,8 @@ h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacin
 .aurora { color: var(--good); margin-top: 4px; }
 .muted { color: var(--muted); font-size: 13px; }
 #clouds, #wind { line-height: 1.5; }
+#clouds { margin-top: 10px; }
+.kp-row { align-items: center; }
 .info-btn {
   display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-left: 2px;
   border: 1px solid var(--muted); border-radius: 50%; background: transparent; color: var(--muted);
