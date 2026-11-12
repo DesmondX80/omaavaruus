@@ -4,6 +4,7 @@ import {
   Equator,
   EquatorFromVector,
   Horizon,
+  Illumination,
   MakeTime,
   MoonPhase,
   Observer,
@@ -84,5 +85,27 @@ export function getSkyChart(lat: number, lon: number, elevationM: number, at: Da
     moon_phase_name: moonPhaseName(phaseDeg),
     objects,
     note: "Korkeus horisontista asteina, atsimuutti myötäpäivään pohjoisesta.",
+  };
+}
+
+export interface SkyLight {
+  sun_alt: number;
+  moon_alt: number;
+  /** Kuun valaistu osuus 0…1. */
+  moon_illumination: number;
+}
+
+/** Auringon ja Kuun korkeus sekä Kuun valaistu osuus: näistä päätellään, onko taivas tarpeeksi pimeä. */
+export function skyLight(lat: number, lon: number, at: Date): SkyLight {
+  const time = MakeTime(at);
+  const observer = new Observer(lat, lon, 0);
+  const altitude = (body: Body) => {
+    const eq = Equator(body, time, observer, true, true);
+    return Horizon(time, observer, eq.ra, eq.dec).altitude;
+  };
+  return {
+    sun_alt: round(altitude(Body.Sun), 1),
+    moon_alt: round(altitude(Body.Moon), 1),
+    moon_illumination: round(Illumination(Body.Moon, time).phase_fraction, 2),
   };
 }

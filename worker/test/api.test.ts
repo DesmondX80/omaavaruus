@@ -4,8 +4,8 @@ import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
 import { asRecords } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
-import { moonPhaseName } from "../src/sky";
-import { auroraChance, cloudAdjustedChance, kpToGScale, parseTs } from "../src/spaceweather";
+import { moonPhaseName, skyLight } from "../src/sky";
+import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
 const env: Env = {
   DEFAULT_LAT: "65.0121",
@@ -30,7 +30,16 @@ const get = (path: string, headers: Record<string, string> = {}) =>
   worker.fetch(new Request(`https://api.test${path}`, { headers }), env);
 
 beforeEach(() => resetLaunchState());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+/** Pimeä yö lähellä uuttakuuta sekä Oulussa että Grönlannissa: valoisuus ja Kuu eivät vaikuta arvioon. */
+const darkNight = () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-08T23:30:00Z"));
+};
 
 describe("apufunktiot", () => {
   it("muuntaa Kp:n G-asteikoksi", () => {
@@ -50,6 +59,34 @@ describe("apufunktiot", () => {
     expect(cloudAdjustedChance("Hyvä", 95)).toBe("Epätodennäköinen");
     expect(cloudAdjustedChance("Mahdollinen", 80)).toBe("Epätodennäköinen");
     expect(cloudAdjustedChance("Hyvä", null)).toBe("Hyvä");
+  });
+
+  it("huomioi valoisuuden ja kuutamon revontuliarviossa", () => {
+    const dark = { sun_alt: -30, moon_alt: -10, moon_illumination: 0.9 };
+    expect(visibleChance("Erittäin hyvä", 10, dark)).toEqual({ chance: "Erittäin hyvä", limits: [] });
+    expect(visibleChance("Erittäin hyvä", 10, { ...dark, sun_alt: 5 })).toEqual({ chance: "Epätodennäköinen", limits: ["valoisuus"] });
+    expect(visibleChance("Hyvä", 10, { ...dark, sun_alt: -9 })).toEqual({ chance: "Mahdollinen", limits: ["hämärä"] });
+    expect(visibleChance("Hyvä", 50, { ...dark, moon_alt: 20 })).toEqual({ chance: "Mahdollinen", limits: ["pilvisyys"] });
+    expect(visibleChance("Erittäin hyvä", 10, { ...dark, moon_alt: 20 })).toEqual({ chance: "Hyvä", limits: ["kuu"] });
+    expect(visibleChance("Erittäin hyvä", 10, { ...dark, moon_alt: 20, moon_illumination: 0.2 }).chance).toBe("Erittäin hyvä");
+    expect(visibleChance("Epätodennäköinen", 10, { ...dark, sun_alt: 5 })).toEqual({ chance: "Epätodennäköinen", limits: [] });
+    expect([lightLabel(0), lightLabel(-9), lightLabel(-20)]).toEqual(["Valoisaa", "Hämärää", "Pimeää"]);
+  });
+
+  it("laskee Auringon ja Kuun valoisuuden", () => {
+    expect(skyLight(65, 25.5, new Date("2026-06-21T10:00:00Z")).sun_alt).toBeGreaterThan(40);
+    const winterNight = skyLight(65, 25.5, new Date("2026-11-08T23:30:00Z"));
+    expect(winterNight.sun_alt).toBeLessThan(-12);
+    expect(winterNight.moon_illumination).toBeLessThan(0.1);
+  });
+
+  it("valitsee parhaan havaintoikkunan", () => {
+    const hours = ["Mahdollinen", "Hyvä", "Hyvä", null, "Hyvä"].map((chance, i) => ({
+      time_tag: `2026-11-08T${20 + i}:00:00.000Z`,
+      chance,
+    }));
+    expect(bestWindow(hours)).toEqual({ start: "2026-11-08T21:00:00.000Z", end: "2026-11-08T23:00:00.000Z", chance: "Hyvä" });
+    expect(bestWindow([{ time_tag: "2026-11-08T20:00:00.000Z", chance: "Epätodennäköinen" }])).toBeNull();
   });
 
   it("purkaa FMI:n WFS-vastauksen", () => {
@@ -132,19 +169,20 @@ describe("reitit", () => {
   });
 
   it("hakee avaruussään", async () => {
+    darkNight();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
         if (url.endsWith("solar-wind-speed.json")) return Response.json([{ proton_speed: 512, time_tag: "2026-10-29T09:03:00Z" }]);
         if (url.endsWith("solar-wind-mag-field.json")) return Response.json([{ bt: 6, bz_gsm: -4 }]);
-        if (url.endsWith("forecast.json")) return Response.json([["time_tag", "kp", "observed"], ["2026-10-30 00:00:00", "4", "predicted"]]);
+        if (url.endsWith("forecast.json")) return Response.json([["time_tag", "kp", "observed"], ["2026-11-01 00:00:00", "7", "observed"], ["2026-11-09 00:00:00", "4", "predicted"]]);
         if (url.startsWith("https://opendata.fmi.fi/")) {
           expect(new URL(url).searchParams.get("latlon")).toBe("65.0123,25.4651");
           return new Response(
             fmiXml([
-              ["2026-10-29T10:00:00Z", "TotalCloudCover", "80"],
-              ["2026-10-29T11:00:00Z", "TotalCloudCover", "20"],
+              ["2026-11-08T23:00:00Z", "TotalCloudCover", "80"],
+              ["2026-11-09T00:00:00Z", "TotalCloudCover", "20"],
             ]),
           );
         }
@@ -157,15 +195,24 @@ describe("reitit", () => {
     expect(body.kp_now).toBe(5.33);
     expect(body.g_label).toBe("G1 – heikko myrsky");
     expect([body.solar_wind_speed_kms, body.bz_nt, body.bt_nt]).toEqual([512, -4, 6]);
-    expect(body.kp_forecast[0].time_tag).toBe("2026-10-30T00:00:00.000Z");
+    expect(body.kp_forecast.map((p: any) => p.time_tag)).toEqual(["2026-11-09T00:00:00.000Z"]);
     expect(body.cloud_cover_pct).toBe(80);
     expect(body.cloud_provider).toBe("Ilmatieteen laitos");
     expect(body.aurora_chance_geomagnetic).toBe("Erittäin hyvä");
     expect(body.aurora_chance).toBe("Mahdollinen");
-    expect(body.clearest_hour).toEqual({ time_tag: "2026-10-29T11:00:00.000Z", cloud_cover: 20 });
+    expect(body.aurora_limits).toEqual(["pilvisyys"]);
+    expect(body.light).toBe("Pimeää");
+    expect(body.hourly).toHaveLength(24);
+    // Kp-ennuste alkaa vasta klo 00 UTC, joten kuluvalle tunnille ei ole arviota.
+    expect(body.hourly[0]).toMatchObject({ time_tag: "2026-11-08T23:00:00.000Z", kp: null, cloud_cover: 80, chance: null });
+    expect(body.hourly[1]).toMatchObject({ kp: 4, cloud_cover: 20, light: "Pimeää", chance: "Hyvä", limits: [] });
+    expect(body.hourly[3]).toMatchObject({ kp: 4, cloud_cover: null, chance: "Hyvä" });
+    expect(body.hourly[4].kp).toBeNull();
+    expect(body.best_window).toEqual({ start: "2026-11-09T00:00:00.000Z", end: "2026-11-09T03:00:00.000Z", chance: "Hyvä" });
   });
 
   it("käyttää Open-Meteoa, kun FMI:llä ei ole dataa", async () => {
+    darkNight();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -173,7 +220,7 @@ describe("reitit", () => {
         if (url.startsWith("https://api.open-meteo.com/")) {
           return Response.json({
             current: { cloud_cover: 50 },
-            hourly: { time: ["2026-10-29T10:00", "2026-10-29T11:00"], cloud_cover: [50, 10] },
+            hourly: { time: ["2026-11-08T23:00", "2026-11-09T00:00"], cloud_cover: [50, 10] },
           });
         }
         if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-10-29T09:00:00", Kp: 5.33 }]);
@@ -186,9 +233,10 @@ describe("reitit", () => {
     expect(body.cloud_cover_pct).toBe(50);
     expect(body.cloud_provider).toBe("Open-Meteo");
     expect(body.aurora_chance).toBe("Hyvä");
-    expect(body.clearest_hour).toEqual({ time_tag: "2026-10-29T11:00:00.000Z", cloud_cover: 10 });
+    expect(body.hourly[1].cloud_cover).toBe(10);
   });
   it("antaa Kp-arvion, vaikka kumpikaan pilvisyyslähde ei vastaa", async () => {
+    darkNight();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {

@@ -18,9 +18,10 @@ make test
 
 Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemiston npm-skriptejä.
 
-## Ominaisuudet (v0.1)
+## Ominaisuudet
 
-- **Avaruussää**: Kp-indeksi (NOAA SWPC), G-asteikko, aurinkotuulen nopeus, Bz, hälytykset ja revontuliarvio havaintopaikan leveysasteelle.
+- **Avaruussää**: Kp-indeksi (NOAA SWPC), G-asteikko, aurinkotuulen nopeus, Bz ja hälytykset.
+- **Revontuliarvio**: Kp ja leveysaste, josta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja ~55 kirkkainta tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). Aikaslider ±12 h.
 - **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta.
 
@@ -57,13 +58,13 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | --- | --- |
 | `GET /api/health` | Terveystarkistus |
 | `GET /api/config` | Oletuskoordinaatit |
-| `GET /api/spaceweather?lat=65.0` | Kp-historia ja -ennuste, aurinkotuuli, revontuliarvio |
+| `GET /api/spaceweather?lat&lon` | Kp-historia ja -ennuste, aurinkotuuli, revontuliarvio nyt ja tunneittain (`hourly`, `best_window`) |
 | `GET /api/launches` | 5 seuraavaa laukaisua |
 | `GET /api/sky?lat&lon&at` | Taivaankartta hetkelle |
 
 ## Seuraavat askeleet
 
 1. Kääri taivaankartta WebGL:ään (esim. three.js) ja lisää tähtikuvioiden viivat.
-2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit ja revontulien näkyvyysrajapyykki (esim. Kp + pilvisyys FMI:ltä).
+2. Lisää NOAA DSCOVR/ACE-reaaliaikaparametrit ja OVATION-revontulimalli Kp-heuristiikan tilalle.
 3. Suodata laukaisut suosikkitoimijoittain ja tallenna ilmoitukset (web push).
 4. Jaettu välimuisti Workers KV:llä, jos isolaattikohtainen välimuisti ei riitä.

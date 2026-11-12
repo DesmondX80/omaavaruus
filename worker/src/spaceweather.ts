@@ -1,5 +1,6 @@
 import { getCloudCover, type CloudCover } from "./clouds";
 import { asRecords, cached, fetchJson } from "./http";
+import { skyLight, type SkyLight } from "./sky";
 
 const SWPC = "https://services.swpc.noaa.gov";
 const TTL_S = 300;
@@ -53,6 +54,103 @@ export function cloudAdjustedChance(chance: string, cloudCover: number | null): 
   return CHANCE_LEVELS[Math.max(0, level - drop)];
 }
 
+/** Taivaan valoisuus Auringon korkeudesta: porvarillinen hämärä päättyy −6°:ssa, merenkulkuhämärä −12°:ssa. */
+export function lightLabel(sunAlt: number): string {
+  if (sunAlt > -6) return "Valoisaa";
+  if (sunAlt > -12) return "Hämärää";
+  return "Pimeää";
+}
+
+export interface Visibility {
+  chance: string;
+  /** Mitkä tekijät laskivat arviota: "valoisuus", "pilvisyys", "hämärä", "kuu". */
+  limits: string[];
+}
+
+/**
+ * Arvio siitä, näkyvätkö revontulet oikeasti: geomagneettinen arvio, josta vähennetään
+ * pilvisyys, taivaan valoisuus ja kuutamo.
+ * - Aurinko yli −6°: liian valoisaa, ei näkyvyyttä.
+ * - Aurinko −6…−12°: hämärä pudottaa yhden portaan.
+ * - Kuu horisontin yläpuolella ja vähintään puoliksi valaistu: yksi porras, mutta ei alle "Mahdollisen",
+ *   koska kuutamo himmentää revontulia eikä peitä niitä kokonaan.
+ */
+export function visibleChance(geomagnetic: string, cloudCover: number | null, light: SkyLight): Visibility {
+  let level = CHANCE_LEVELS.indexOf(geomagnetic);
+  if (level <= 0) return { chance: geomagnetic, limits: [] };
+  if (light.sun_alt > -6) return { chance: CHANCE_LEVELS[0], limits: ["valoisuus"] };
+  const limits: string[] = [];
+  const afterClouds = CHANCE_LEVELS.indexOf(cloudAdjustedChance(geomagnetic, cloudCover));
+  if (afterClouds < level) limits.push("pilvisyys");
+  level = afterClouds;
+  if (level > 0 && light.sun_alt > -12) {
+    level -= 1;
+    limits.push("hämärä");
+  }
+  if (level > 1 && light.moon_alt > 0 && light.moon_illumination >= 0.5) {
+    level -= 1;
+    limits.push("kuu");
+  }
+  return { chance: CHANCE_LEVELS[level], limits };
+}
+
+export interface HourPoint extends SkyLight {
+  time_tag: string;
+  /** null, jos Kp-ennuste ei kata tuntia; silloin arviokin puuttuu. */
+  kp: number | null;
+  cloud_cover: number | null;
+  light: string;
+  chance: string | null;
+  chance_geomagnetic: string | null;
+  limits: string[];
+}
+
+/** Ensimmäinen yhtenäinen jakso, jolla arvio on ennusteen paras. null, jos mikään tunti ei ole edes "Mahdollinen". */
+export function bestWindow(hours: Pick<HourPoint, "time_tag" | "chance">[]) {
+  const levels = hours.map((h) => (h.chance === null ? -1 : CHANCE_LEVELS.indexOf(h.chance)));
+  const top = Math.max(0, ...levels);
+  if (top === 0) return null;
+  const first = levels.indexOf(top);
+  let last = first;
+  while (levels[last + 1] === top) last++;
+  return {
+    start: hours[first].time_tag,
+    end: new Date(Date.parse(hours[last].time_tag) + HOUR_MS).toISOString(),
+    chance: CHANCE_LEVELS[top],
+  };
+}
+
+const HOUR_MS = 3_600_000;
+const HOURLY_COUNT = 24;
+const KP_BIN_MS = 3 * HOUR_MS;
+
+/** Tuntikohtainen arvio kuluvasta tunnista eteenpäin: Kp-ennuste (3 h jaksot), pilvisyysennuste ja valoisuus. */
+function hourlyOutlook(lat: number, lon: number, now: Date, kpRows: KpPoint[], clouds: CloudCover | null): HourPoint[] {
+  const start = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS;
+  const cloudAt = new Map(clouds?.forecast.map((p) => [Date.parse(p.time_tag), p.cloud_cover]));
+  return Array.from({ length: HOURLY_COUNT }, (_, i) => {
+    const t = start + i * HOUR_MS;
+    const kp = kpRows.filter((row) => {
+      const bin = Date.parse(row.time_tag);
+      return bin <= t && t < bin + KP_BIN_MS;
+    }).at(-1)?.kp ?? null;
+    const cloud = cloudAt.get(t) ?? null;
+    // Kuluvan tunnin valoisuus lasketaan nykyhetkelle, tulevien tuntien tasatunnille.
+    const light = skyLight(lat, lon, i === 0 ? now : new Date(t));
+    const geomagnetic = kp === null ? null : auroraChance(kp, lat);
+    const visibility = geomagnetic === null ? { chance: null, limits: [] } : visibleChance(geomagnetic, cloud, light);
+    return {
+      time_tag: new Date(t).toISOString(),
+      kp,
+      cloud_cover: cloud,
+      ...light,
+      light: lightLabel(light.sun_alt),
+      ...visibility,
+      chance_geomagnetic: geomagnetic,
+    };
+  });
+}
+
 /** Lyhyt sanallinen kuvaus pilvisyydestä. */
 export function cloudLabel(cloudCover: number): string {
   if (cloudCover < 15) return "Selkeää";
@@ -82,7 +180,8 @@ async function kpHistory(): Promise<KpPoint[]> {
 
 async function kpForecast(): Promise<KpPoint[]> {
   const rows = await swpc("/products/noaa-planetary-k-index-forecast.json");
-  return rows.slice(0, 24).map((row) => {
+  // Syöte sisältää noin viikon havaitut arvot ja kolmen vuorokauden ennusteen; rajaus tehdään käyttöhetkellä.
+  return rows.map((row) => {
     const kp = Number(row.kp ?? 0);
     return { time_tag: parseTs(row.time_tag), kp, kind: String(row.observed ?? "predicted"), g_scale: kpToGScale(kp) };
   });
@@ -137,30 +236,34 @@ export async function getSpaceWeather(lat: number, lon: number) {
       return null;
     }),
   ]);
+  const now = new Date();
   const kpNow = history.at(-1)?.kp ?? 0;
   const g = kpToGScale(kpNow);
   const geomagnetic = auroraChance(kpNow, lat);
   const cloudNow = clouds?.now ?? null;
-  const clearest = clouds?.forecast.length
-    ? clouds.forecast.reduce((best, p) => (p.cloud_cover < best.cloud_cover ? p : best))
-    : null;
+  const light = skyLight(lat, lon, now);
+  const visibility = visibleChance(geomagnetic, cloudNow, light);
+  const hourly = hourlyOutlook(lat, lon, now, forecast, clouds);
   return {
-    updated: new Date().toISOString(),
+    updated: now.toISOString(),
     kp_now: kpNow,
     g_scale: g,
     g_label: G_LABELS[g],
     kp_history: history,
-    kp_forecast: forecast,
+    kp_forecast: forecast.filter((p) => Date.parse(p.time_tag) > now.getTime() - KP_BIN_MS).slice(0, 24),
     solar_wind_speed_kms: speed,
     bz_nt: bz,
     bt_nt: bt,
-    aurora_chance: cloudAdjustedChance(geomagnetic, cloudNow),
+    aurora_chance: visibility.chance,
     aurora_chance_geomagnetic: geomagnetic,
+    aurora_limits: visibility.limits,
+    ...light,
+    light: lightLabel(light.sun_alt),
     cloud_cover_pct: cloudNow,
     cloud_label: cloudNow === null ? null : cloudLabel(cloudNow),
     cloud_provider: clouds?.provider ?? null,
-    cloud_forecast: clouds?.forecast ?? [],
-    clearest_hour: clearest,
+    hourly,
+    best_window: bestWindow(hourly),
     alerts: alertList,
     sources: [
       `${SWPC}/products/noaa-planetary-k-index.json`,

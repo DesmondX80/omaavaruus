@@ -6,7 +6,7 @@ const STORED_QUERY = "fmi::forecast::edited::weather::scandinavia::point::simple
 /** Maailmanlaajuinen varalähde, kun FMI:llä ei ole dataa (Pohjoismaiden ulkopuolella tai katkos). */
 const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
 const TTL_S = 900;
-const FORECAST_HOURS = 12;
+const FORECAST_HOURS = 24;
 
 export interface CloudPoint {
   time_tag: string;

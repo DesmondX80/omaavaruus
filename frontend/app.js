@@ -1,4 +1,4 @@
-const state = {lat:65.0121, lon:25.4651, accuracy:null, offset:0};
+const state = {lat:65.0121, lon:25.4651, accuracy:null, offset:0, hour:null};
 const el = id => document.getElementById(id);
 const API = (window.OMAVARUUS_API || "").replace(/\/$/, "");
 const fmt = d => d ? new Date(d).toLocaleString('fi-FI') : 'Aika tarkentuu';
@@ -11,7 +11,9 @@ async function json(path) {
 const INFO = {
   kp: ['Kp-indeksi', 'Kp kuvaa maapallon magneettikentän häiriöisyyttä asteikolla 0–9. Mitä suurempi luku, sitä voimakkaampi geomagneettinen myrsky ja sitä etelämpänä revontulia voi nähdä. Lapissa revontulia voi näkyä jo Kp 1–2:lla, Etelä-Suomessa tarvitaan yleensä vähintään Kp 4–5. Arvo on NOAA:n laskema kolmen tunnin arvo, ja käyrä näyttää viimeiset 72 tuntia.'],
   g: ['G-asteikko', 'NOAA:n asteikko geomagneettisten myrskyjen voimakkuudelle. G1 (heikko) vastaa Kp 5:tä, G2 Kp 6:ta, G3 Kp 7:ää, G4 Kp 8:aa ja G5 (äärimmäinen) Kp 9:ää. Alle Kp 5 on rauhallista.'],
-  kpOnly: ['Kp yksin', 'Revontuliarvio pelkän Kp-indeksin ja leveysasteen perusteella, ennen kuin pilvisyys otetaan huomioon. Kertoo, kannattaisiko revontulia odottaa selkeällä säällä.'],
+  kpOnly: ['Kp yksin', 'Revontuliarvio pelkän Kp-indeksin ja leveysasteen perusteella, ennen kuin pilvisyys, valoisuus ja kuutamo otetaan huomioon. Kertoo, kannattaisiko revontulia odottaa selkeällä ja pimeällä säällä.'],
+  light: ['Valoisuus', 'Revontulet näkyvät vain riittävän pimeällä taivaalla. Kun Aurinko on alle 6° horisontin alapuolella, on liian valoisaa. Hämärässä (Aurinko 6–12° horisontin alapuolella) arvio laskee yhden portaan, ja sitä syvemmällä on pimeää. Kirkas kuutamo (Kuu ylhäällä ja vähintään puoliksi valaistu) himmentää heikkoja revontulia ja laskee arviota yhden portaan.'],
+  hourly: ['Tuntiennuste', 'Revontuliarvio tunneittain: mitä kirkkaampi vihreä, sitä parempi. Arviossa yhdistyvät NOAA:n Kp-ennuste (kolmen tunnin jaksoissa), pilvisyysennuste, taivaan valoisuus ja kuutamo. Katkoviivalla merkityt tunnit ovat liian valoisia. Napauta tuntia nähdäksesi tarkemmat tiedot.'],
   clouds: ['Pilvisyys', 'Kokonaispilvisyys prosentteina: 0 % on täysin selkeää ja 100 % täysin pilvistä. ± kertoo, kuinka tarkasti laitteesi paikansi sijaintisi metreinä. Pilvisyys yli 30 % heikentää revontuliarviota ja yli 90 % estää näkyvyyden.'],
   wind: ['Aurinkotuuli', 'Auringosta virtaavien sähköisesti varattujen hiukkasten nopeus kilometreinä sekunnissa (km/s). Tavallisesti noin 300–500 km/s. Yli 500–600 km/s tehostaa revontulia, varsinkin jos Bz on negatiivinen.'],
   bz: ['Bz', 'Aurinkotuulen mukana kulkevan magneettikentän pohjois–eteläsuuntainen komponentti. Kun Bz on negatiivinen (etelään päin), energiaa pääsee helpommin maapallon magneettikenttään ja revontulien todennäköisyys kasvaa. Yksikkö nT on nanotesla, magneettikentän voimakkuuden yksikkö.'],
@@ -41,13 +43,49 @@ document.addEventListener('click',e=>{
   const t=document.createElement('b'); t.textContent=title; box.append(t,' ',text);
   host.after(box); b.setAttribute('aria-expanded','true');
 });
+const hhmm=d=>new Date(d).toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
+const num=(v,digits=0)=>v.toLocaleString('fi-FI',{maximumFractionDigits:digits});
+const LEVELS=['Epätodennäköinen','Mahdollinen','Hyvä','Erittäin hyvä'];
+const moonText=h=>`Kuu ${Math.round(h.moon_illumination*100)} % valaistu, ${h.moon_alt>0?'horisontin yläpuolella':'horisontin alapuolella'}`;
+function hourDetail(h) {
+  return [
+    `Klo ${hhmm(h.time_tag)}: ${h.chance ?? 'ei Kp-ennustetta'}`,
+    h.kp==null?null:`Kp ${num(h.kp,1)}`,
+    h.cloud_cover==null?'pilvisyys ei tiedossa':`pilvisyys ${Math.round(h.cloud_cover)} %`,
+    `${h.light.toLowerCase()} (Aurinko ${num(h.sun_alt)}°)`,
+    moonText(h).replace('Kuu','kuu'),
+    h.limits.length?`rajoittaa: ${h.limits.join(', ')}`:null,
+  ].filter(Boolean).join(' · ');
+}
+function hourly(w) {
+  el('hourly').hidden=!w.hourly.length;
+  const b=w.best_window;
+  el('best-window').textContent=b
+    ? `Paras hetki: klo ${hhmm(b.start)}–${hhmm(b.end)} (${b.chance})`
+    : 'Ei revontulille otollista hetkeä seuraavan 24 tunnin aikana';
+  el('best-window').classList.toggle('none',!b);
+  const selected=w.hourly.find(h=>h.time_tag===state.hour) ?? w.hourly.find(h=>h.time_tag===b?.start);
+  el('hour-detail').textContent=selected?hourDetail(selected):'';
+  el('hours').replaceChildren(...w.hourly.map(h=>{
+    const btn=document.createElement('button'), bar=document.createElement('i'), label=document.createElement('small');
+    const hour=new Date(h.time_tag).getHours();
+    btn.type='button'; btn.className=`hour l${h.chance==null?'x':LEVELS.indexOf(h.chance)}${h.light==='Valoisaa'?' day':''}`;
+    btn.setAttribute('aria-label',hourDetail(h)); btn.setAttribute('aria-pressed',String(h===selected));
+    label.textContent=hour%3===0?String(hour).padStart(2,'0'):'';
+    btn.append(bar,label);
+    btn.addEventListener('click',()=>{
+      state.hour=h.time_tag; el('hour-detail').textContent=hourDetail(h);
+      el('hours').querySelectorAll('.hour').forEach(x=>x.setAttribute('aria-pressed',String(x===btn)));
+    });
+    return btn;
+  }));
+}
 async function weather() {
   try {
     const w = await json(`/api/spaceweather?lat=${state.lat}&lon=${state.lon}`);
     el('kp').textContent=w.kp_now.toFixed(1);
     el('g-label').replaceChildren(w.g_label, ' ', infoBtn('g'));
-    el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}`;
-    const hhmm=d=>new Date(d).toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
+    el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}${w.aurora_limits.length?` – rajoittaa: ${w.aurora_limits.join(', ')}`:''}`;
     const where=state.accuracy==null?'oletussijainnissa':`sijainnissasi (±${Math.round(state.accuracy)} m)`;
     el('clouds').replaceChildren(...(w.cloud_cover_pct==null
       ? [line('Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin')]
@@ -56,8 +94,10 @@ async function weather() {
           line(`Lähde: ${w.cloud_provider}`),
         ]),
       line(`Kp yksin: ${w.aurora_chance_geomagnetic}`, infoBtn('kpOnly')),
-      ...(w.clearest_hour?[line(`Selkein 12 h sisällä: klo ${hhmm(w.clearest_hour.time_tag)} (${Math.round(w.clearest_hour.cloud_cover)} %)`)]:[]),
+      line(`Valoisuus: ${w.light} (Aurinko ${num(w.sun_alt)}°)`, infoBtn('light')),
+      line(moonText(w)),
     );
+    hourly(w);
     el('wind').replaceChildren(
       line(`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s`, infoBtn('wind')),
       line(`Bz: ${w.bz_nt ?? '–'} nT`, infoBtn('bz')),
