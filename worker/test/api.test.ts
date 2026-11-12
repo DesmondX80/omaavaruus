@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
 import { parseFmiSimple } from "../src/clouds";
+import { getEvents } from "../src/events";
 import { parsePlaces } from "../src/geocode";
 import { asRecords, clearCache } from "../src/http";
 import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
@@ -231,6 +232,31 @@ describe("reitit", () => {
     const r = await get("/api/sky/object?lat=65&lon=25.5&at=2026-01-01T00:00:00&name=Kuu");
     expect((await r.json<any>()).kind).toBe("moon");
     expect((await get("/api/sky/object?name=Olematon")).status).toBe(404);
+  });
+
+  it("laskee taivaan tapahtumat ja niiden näkyvyyden paikalta", async () => {
+    const from = new Date("2026-11-12T17:00:00Z");
+    const oulu = getEvents(65, 25.5, from).events;
+    const find = (events: typeof oulu, title: string) => events.find((e) => e.title === title)!;
+    expect(oulu.map((e) => e.time)).toEqual(oulu.map((e) => e.time).sort());
+
+    expect(find(oulu, "Geminidit")).toMatchObject({ type: "meteor_shower", time: "2026-12-14T00:00:00.000Z", visible: true });
+    // Elokuussa Oulun yö ei pimene tarpeeksi, Helsingin pimenee.
+    expect(find(oulu, "Perseidit")).toMatchObject({ visible: false, best_time: null });
+    expect(find(getEvents(60.2, 24.9, from).events, "Perseidit").visible).toBe(true);
+
+    const conjunction = find(oulu, "Mars ja Jupiter lähekkäin");
+    expect(conjunction.time.slice(0, 10)).toBe("2026-11-16");
+    expect(conjunction.detail).toContain("1,2°");
+    expect(conjunction.visibility).toContain("aamutaivaalla");
+    expect(find(oulu, "Merkurius ja Venus lähekkäin").visibility).toContain("liian lähellä Aurinkoa");
+
+    expect(find(oulu, "Kuun puolivarjopimennys")).toMatchObject({ type: "lunar_eclipse", visible: true, visibility: "Näkyy kokonaan" });
+    expect(find(oulu, "Osittainen auringonpimennys").time.slice(0, 10)).toBe("2027-08-02");
+
+    const r = await get("/api/events?lat=65&lon=25.5");
+    expect(r.status).toBe(200);
+    expect((await r.json<any>()).events.length).toBeGreaterThan(10);
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

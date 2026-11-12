@@ -1,5 +1,6 @@
+import { getEvents } from "./events";
 import { searchPlaces } from "./geocode";
-import { HttpError } from "./http";
+import { cached, HttpError } from "./http";
 import { getLaunches } from "./launches";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
 import { getSkyChart, getSkyObject } from "./sky";
@@ -13,6 +14,9 @@ export interface Env extends PushEnv {
   LAUNCH_LIMIT: string;
   CORS_ORIGINS: string;
 }
+
+/** Tapahtumakalenteri muuttuu hitaasti, joten laskettu vuosi kelpaa tunteja. */
+const EVENTS_TTL_S = 6 * 3600;
 
 /** Lukee numeerisen kyselyparametrin ja tarkistaa rajat. */
 function numberParam(url: URL, name: string, fallback: number, min: number, max: number): number {
@@ -72,6 +76,11 @@ async function route(url: URL, env: Env): Promise<unknown> {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
       }
+    }
+    case "/api/events": {
+      // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
+      const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
+      return cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()));
     }
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();

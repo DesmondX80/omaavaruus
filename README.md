@@ -24,6 +24,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 - **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h.
+- **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
 - **Revontuli-ilmoitukset**: push-ilmoitus puhelimeen, kun revontuliarvio valitussa paikassa on vähintään käyttäjän valitsemalla rajalla. Worker tarkistaa tilanteen 15 minuutin välein (Cron Trigger) ja säilyttää tilaukset Workers KV:ssä.
 - **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta.
@@ -43,6 +44,7 @@ worker/
     push.ts          # ilmoitustilaukset (KV) ja ajastettu tarkistus
     webpush.ts       # push-viestin salaus (RFC 8291) ja VAPID-tunniste (RFC 8292)
     launches.ts      # RocketLaunch.Live + uudelleenyrityksen odotus
+    events.ts        # tapahtumakalenteri: meteoriparvet, pimennykset, konjunktiot
     sky.ts           # astronomy-engine + tähdet ja tähtikuvioiden viivat (stars.ts)
   test/              # vitest: API sekä frontendin tiedostolistojen ja tuontien tarkistus
 frontend/
@@ -52,7 +54,7 @@ frontend/
   js/                # ES-moduulit ilman käännösvaihetta
     main.js          # käynnistys ja ajastukset
     core.js          # jaettu tila, API-kutsut, apufunktiot
-    weather.js, sky.js, skychart.js, places.js, push.js, launches.js, info.js
+    weather.js, sky.js, skychart.js, events.js, places.js, push.js, launches.js, info.js
 ```
 
 ## Julkaisu
@@ -85,6 +87,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `POST /api/push/subscribe` | Tallentaa tai päivittää ilmoitustilauksen (`subscription`, `lat`, `lon`, `place`, `threshold`) |
 | `POST /api/push/unsubscribe` | Poistaa tilauksen (`endpoint`) |
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
+| `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta |
 | `GET /api/launches` | 5 seuraavaa laukaisua |
 | `GET /api/sky?lat&lon&at` | Taivaankartta hetkelle |
 | `GET /api/sky/object?name&lat&lon&at` | Yhden kohteen paikka sekä seuraava nousu, lasku ja korkein kohta |
