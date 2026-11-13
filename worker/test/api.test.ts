@@ -12,6 +12,7 @@ import { parseLaunch, resetLaunchState, retrySeconds } from "../src/launches";
 import { getSkyObject, moonPhaseName, skyLight } from "../src/sky";
 import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
+import { moonlessNights, moonPhases } from "../src/moon";
 import { GRID_CODEC, ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
@@ -402,6 +403,27 @@ describe("reitit", () => {
     const events = await (await get("/api/events?lat=60.17&lon=24.94")).json<any>();
     expect(events.events.find((e: any) => e.title === "Leonidit").cloud_cover).toBe(30);
     expect(events.events.find((e: any) => e.title === "Geminidit").cloud_cover).toBeNull();
+  });
+
+  it("laskee Kuun vaiheet ja kuuttomat yöt", async () => {
+    const from = new Date("2026-11-13T16:00:00Z");
+    const phases = moonPhases(from);
+    expect(phases.slice(0, 2)).toMatchObject([
+      { quarter: 1, title: "Ensimmäinen neljännes", time: expect.stringMatching(/^2026-11-17T11/) },
+      { quarter: 2, title: "Täysikuu", time: expect.stringMatching(/^2026-11-24T14/) },
+    ]);
+    // Neljännekset seuraavat toisiaan noin viikon välein.
+    expect(phases.length).toBeGreaterThanOrEqual(15);
+    expect(phases.every((p, i) => i === 0 || p.quarter === (phases[i - 1].quarter + 1) % 4)).toBe(true);
+    // Oulussa kasvava sirppi laskee iltahämärissä: kaksi ensimmäistä yötä ovat kuuttomia.
+    const nights = moonlessNights(65, 25.5, from);
+    expect(nights[0]).toMatchObject({ start: from.toISOString(), nights: 2 });
+    expect(nights[0].end.slice(0, 10)).toBe("2026-11-15");
+    // Kesäkuun Helsingissä ei tule pimeää lainkaan.
+    expect(moonlessNights(60.17, 24.94, new Date("2026-06-10T12:00:00Z"))).toEqual([]);
+    const body = await (await get("/api/moon?lat=65&lon=25.5")).json<any>();
+    expect(body.phases.length).toBeGreaterThan(10);
+    expect(Array.isArray(body.moonless)).toBe(true);
   });
 
   it("palauttaa ISS-reitin ja lisää aseman taivaankartalle", async () => {

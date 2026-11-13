@@ -3,6 +3,7 @@ import { getEvents } from "./events";
 import { searchPlaces } from "./geocode";
 import { cached, HttpError, sharedCacheWorks } from "./http";
 import { getLaunches } from "./launches";
+import { getMoon } from "./moon";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
 import { getIss, ISS_NAME, issSkyDetail, issSkyObject } from "./iss";
 import { getOvation, ovationMap } from "./ovation";
@@ -115,6 +116,11 @@ async function route(url: URL, env: Env): Promise<unknown> {
         events: calendar.events.map((e) => ({ ...e, cloud_cover: e.best_time ? cloudAt(clouds, e.best_time) : null })),
         cloud_provider: clouds?.provider ?? null,
       };
+    }
+    case "/api/moon": {
+      // Sama pyöristys ja välimuistiaika kuin tapahtumilla: kuuttomat yöt eivät muutu kymmenen kilometrin matkalla.
+      const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
+      return cached(`moon:${la}:${lo}`, EVENTS_TTL_S, async () => getMoon(la, lo, new Date()), true);
     }
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();

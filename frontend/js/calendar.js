@@ -1,5 +1,5 @@
 // Kalenteri: taivaan tapahtumat ja laukaisut samalla aikajanalla päivittäin ryhmiteltynä.
-import { el, store, row, hhmm, fmt, button, cloudNote } from './core.js';
+import { el, store, row, hhmm, fmt, button, cloudNote, dayLabel } from './core.js';
 import { launchPrefs, toggleFavorite } from './launches.js';
 import { placeLabel } from './places.js';
 
@@ -56,19 +56,40 @@ function eventRow(e) {
   return row({kind:'sky', iconName:eventIcon(e.title), title:e.title, details:[e.detail, visibility, e.visible && cloudNote(e.cloud_cover)], when:e.visible ? 'Näkyy' : 'Ei näy', dim:!e.visible});
 }
 
+const PHASE_NOTES = [
+  'Kuu ei näy: pimein aika revontulille, meteoreille ja himmeille kohteille',
+  'Kuu näkyy illalla ja laskee yöllä',
+  'Kirkas kuutamo koko yön himmentää revontulia ja meteoreja',
+  'Kuu nousee yöllä ja näkyy aamulla',
+];
+function phaseRow(p) {
+  return row({kind:'sky', iconName:'moon', title:p.title, details:[PHASE_NOTES[p.quarter]], when:`klo ${hhmm(p.time)}`});
+}
+function moonlessRow(m) {
+  const many=m.nights>1;
+  return row({kind:'sky', iconName:'moon', title:many ? `Kuuttomat yöt (${m.nights})` : 'Kuuton yö',
+    details:[`Kuu on horisontin alla koko pimeän ajan${many ? ` ${dayLabel(m.start)}–${dayLabel(m.end)}` : ''}`, 'Hyvä aika revontulille ja meteoreille'],
+    when:`klo ${hhmm(m.start)}`, whenSub:`– ${many ? `${dayLabel(m.end)} ` : ''}${hhmm(m.end)}`});
+}
+
 function render() {
   const {favorites}=launchPrefs(), launches=store.launches, calendar=store.events;
-  const sky=calendar?.events ?? [];
-  const items=[
+  const sky=calendar?.events ?? [], moon=store.moon, now=Date.now();
+  // Kuuttomat yöt kuuluvat taivaan tapahtumiin; neljännekset näytetään vain Kuu-rajauksella, jottei lista täyty niistä.
+  const moonless=(filter==='all'||filter==='sky'||filter==='moon' ? moon?.moonless ?? [] : []).filter(m=>Date.parse(m.end)>now)
+    .map(m=>({time:Date.parse(m.start), m}));
+  const phases=(filter==='moon' ? moon?.phases ?? [] : []).filter(p=>Date.parse(p.time)>now).map(p=>({time:Date.parse(p.time), p}));
+  const items=filter==='moon' ? [...moonless, ...phases].sort((a,b)=>a.time-b.time) : [
     ...(filter==='sky' ? [] : (launches?.results ?? []).map(l=>({time:l.net ? Date.parse(l.net) : null, fav:favorites.includes(l.provider), l}))
       .filter(x=>filter!=='fav'||x.fav)),
     ...(filter==='launch'||filter==='fav' ? [] : (expanded ? sky : sky.slice(0,COLLAPSED)).map(e=>({time:Date.parse(e.time), e}))),
+    ...moonless,
   ].sort((a,b)=>(a.time ?? 0)-(b.time ?? 0));
   const nodes=[]; let last=null;
   for(const item of items) {
     const label=groupLabel(item.time);
     if(label!==last) {const h=document.createElement('div'); h.className='daylabel'; h.textContent=label; nodes.push(h); last=label;}
-    nodes.push(item.l ? launchRow(item.l,item.fav) : eventRow(item.e));
+    nodes.push(item.l ? launchRow(item.l,item.fav) : item.m ? moonlessRow(item.m) : item.p ? phaseRow(item.p) : eventRow(item.e));
   }
   if(!nodes.length) {
     const empty=document.createElement('div'); empty.className='muted';
@@ -79,9 +100,11 @@ function render() {
   for(const n of nodes) if(n.classList.contains('row')) n.style.borderTop='0';
   el('cal-list').replaceChildren(...nodes);
   const more=sky.length-COLLAPSED, showMore=more>0&&(filter==='all'||filter==='sky');
-  el('cal-more').replaceChildren(...(showMore ? [button('link',expanded ? 'Näytä vähemmän taivaan tapahtumia' : `Näytä koko vuoden taivaan tapahtumat (${sky.length})`,()=>{expanded=!expanded; render();})] : []));
+  if(filter==='moon') el('cal-more').replaceChildren();
+  else el('cal-more').replaceChildren(...(showMore ? [button('link',expanded ? 'Näytä vähemmän taivaan tapahtumia' : `Näytä koko vuoden taivaan tapahtumat (${sky.length})`,()=>{expanded=!expanded; render();})] : []));
   el('cal-meta').textContent=[
-    calendar?.error ?? (calendar ? `Näkyvyys paikasta ${placeLabel()}, seuraavat 12 kuukautta.` : ''),
+    filter==='moon' ? `Kuun vaiheet neljäksi kuukaudeksi ja kuuttomat yöt kahdeksi viikoksi paikasta ${placeLabel()}. Pimeä aika: Aurinko yli 12° horisontin alla.`
+      : calendar?.error ?? (calendar ? `Näkyvyys paikasta ${placeLabel()}, seuraavat 12 kuukautta.` : ''),
     launches ? `Laukaisut: Data by RocketLaunch.Live${launches.updated ? `, haettu ${fmt(launches.updated)}` : ''}${launches.stale ? ' · VANHENTUNUT' : ''}. ${launches.warning}` : '',
   ].filter(Boolean).join(' ');
 }
@@ -93,5 +116,5 @@ export function initCalendar() {
     for(const x of el('cal-filter').children) x.setAttribute('aria-pressed',String(x===b));
     render();
   });
-  document.addEventListener('data',e=>{if(e.detail==='launches'||e.detail==='events') render();});
+  document.addEventListener('data',e=>{if(['launches','events','moon'].includes(e.detail)) render();});
 }

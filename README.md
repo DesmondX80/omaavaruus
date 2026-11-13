@@ -31,7 +31,7 @@ yksityiskohdat. Paikan valinta ja kaikki ilmoitusasetukset avautuvat yläpalkist
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h. Koko näytön tilassa on lisäksi perspektiivinäkymä, jota käännetään sormella tai puhelimen asentoantureilla (DeviceOrientation), ja taustalle voi ottaa takakameran kuvan.
 - **ISS-ylilennot**: aseman sijainti ja näkyvät ylilennot viideksi vuorokaudeksi valitulle paikalle (CelesTrakin ratatiedot, SGP4 [satellite.js](https://github.com/shashwatak/satellite-js):llä). Näkyvyys vaatii, että asema on auringonvalossa ja taivas hämärä. Lähimpien kolmen vuorokauden ylilennoille ja tapahtumille näytetään pilvisyysennuste. Pyöritettävä ja zoomattava maapallokartta näyttää aseman sijainnin ja radan nyt tai valitun ylilennon reitin havaintopaikan ympäristössä, ja sen saa myös koko näytölle. Asema näkyy myös taivaankartalla, jolle seuraava näkyvä ylilento piirretään kaarena, ja näkyvästä ylilennosta voi saada push-ilmoituksen.
-- **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
+- **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki. Kalenterissa ovat myös Kuun vaiheet ja kuuttomat yöt.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
 - **Revontuli-ilmoitukset**: push-ilmoitus puhelimeen, kun revontuliarvio valitussa paikassa on vähintään käyttäjän valitsemalla rajalla. Worker tarkistaa tilanteen 15 minuutin välein (Cron Trigger) ja säilyttää tilaukset Workers KV:ssä.
 - **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta sekä linkki laukaisun sivulle, josta löytyy suoratoisto. Laukaisut näkyvät kalenterissa taivaan tapahtumien kanssa samalla aikajanalla. Suosikkitoimijat (tallennetaan selaimeen) merkitään tähdellä, kalenterin voi rajata niihin ja niiden laukaisuista voi saada push-ilmoituksen noin tuntia ennen.
@@ -54,6 +54,7 @@ worker/
     launches.ts      # RocketLaunch.Live + uudelleenyrityksen odotus
     iss.ts           # ISS: ratatiedot (CelesTrak), sijainti ja ylilennot (satellite.js)
     events.ts        # tapahtumakalenteri: meteoriparvet, pimennykset, konjunktiot
+    moon.ts          # Kuun vaiheet ja kuuttomat yöt (oma reitti CPU-ajan vuoksi)
     sky.ts           # astronomy-engine + tähdet ja tähtikuvioiden viivat (stars.ts)
   test/              # vitest: API sekä frontendin tiedostolistojen ja tuontien tarkistus
 frontend/
@@ -104,6 +105,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
 | `GET /api/iss?lat&lon` | ISS:n sijainti ja ylilennot viideksi vuorokaudeksi, näkyvät merkittyinä, reitteineen (`track`) ja ratoineen taivaalla (`sky_track`), sekä aseman rata seuraavan kierroksen ajalta (`orbit`); näkyvillä ylilennoilla pilvisyysennuste (`cloud_cover`, kolme vuorokautta eteenpäin) |
 | `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta ja pilvisyysennuste parhaalle hetkelle (`cloud_cover`, kolme vuorokautta eteenpäin) |
+| `GET /api/moon?lat&lon` | Kuun neljännekset neljäksi kuukaudeksi ja kuuttomat yöt (Kuu horisontin alla koko pimeän ajan) kahdeksi viikoksi |
 | `GET /api/launches` | 5 seuraavaa laukaisua |
 | `GET /api/sky?lat&lon&at` | Taivaankartta hetkelle |
 | `GET /api/sky/object?name&lat&lon&at` | Yhden kohteen paikka sekä seuraava nousu, lasku ja korkein kohta (`name=ISS`: seuraava ylilento) |
