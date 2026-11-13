@@ -17,6 +17,7 @@ const SHELL = [
   "js/events.js",
   "js/info.js",
   "js/iss.js",
+  "js/issmap.js",
   "js/land.js",
   "js/launches.js",
   "js/places.js",

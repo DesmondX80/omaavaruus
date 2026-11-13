@@ -38,6 +38,9 @@ const MAX_SUN_ALT = -6;
 const SEARCH_DAYS = 5;
 /** Karkean haun askel: matalinkin näkyvä ylilento kestää yli kaksi minuuttia korkeuden 10° yläpuolella. */
 const STEP_MS = MIN;
+/** Kartan reitti: näytteiden väli ja kuinka paljon reittiä piirretään ylilennon kummallekin puolelle. */
+const TRACK_STEP_S = 20;
+const TRACK_MARGIN_MS = 3 * MIN;
 
 export interface Tle {
   name: string;
@@ -159,6 +162,27 @@ export interface Pass {
   visible_start: string | null;
   visible_end: string | null;
   magnitude: number | null;
+  /** Maanpäällinen reitti kartalle näkyvistä ylilennoista: pisteet [leveys, pituus] `step_s` sekunnin välein hetkestä `start`. */
+  track: Track | null;
+}
+
+export interface Track {
+  start: string;
+  step_s: number;
+  points: [number, number][];
+}
+
+/** Aseman alapuolinen piste tasavälein ylilennon ajalta ja vähän sen kummaltakin puolelta. */
+function groundTrack(tracker: Tracker, from: number, to: number): Track {
+  const step = TRACK_STEP_S * 1000;
+  const start = Math.floor((from - TRACK_MARGIN_MS) / 1000) * 1000;
+  const points: [number, number][] = [];
+  for (let t = start; t < to + TRACK_MARGIN_MS + step; t += step) {
+    const state = tracker.state(t);
+    if (!state) break;
+    points.push([round(state.lat, 2), round(state.lon, 2)]);
+  }
+  return { start: new Date(start).toISOString(), step_s: TRACK_STEP_S, points };
 }
 
 /** Ylilennot, joilla asema nousee vähintään MIN_ELEVATION korkeudelle; näkyvät on merkitty. */
@@ -203,6 +227,7 @@ export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days 
         visible_start: visibleStart === null ? null : iso(visibleStart),
         visible_end: visibleEnd === null ? null : iso(visibleEnd),
         magnitude: brightest,
+        track: visibleStart === null ? null : groundTrack(tracker, startTime, endTime),
       });
       t = Math.ceil(s / STEP_MS) * STEP_MS;
       prev = tracker.state(t);

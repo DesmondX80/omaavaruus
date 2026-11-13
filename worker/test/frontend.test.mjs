@@ -68,3 +68,25 @@ describe("taivaan perspektiivinäkymä", async () => {
     expect(project(south, vector(0, 0), 400, 800)).toBeNull();
   });
 });
+
+describe("ISS-ylilennon kartta", async () => {
+  const { horizonKm, project, trackSpan } = await import("../../frontend/js/issmap.js");
+
+  it("projisoi paikat kilometreiksi havaitsijasta", () => {
+    const [east, north] = project(60, 25, 61, 25);
+    expect(east).toBeCloseTo(0, 5);
+    expect(north).toBeCloseTo(111.19, 1);
+    // Itä on oikealla; 60° leveydellä pituusaste on puolet päiväntasaajan asteesta.
+    expect(project(60, 25, 60, 26)[0]).toBeCloseTo(55.6, 0);
+    expect(project(0, 179, 0, -179)[0]).toBeCloseTo(222.4, 0);
+    expect(project(60, 25, 60, 25)).toEqual([0, 0]);
+  });
+
+  it("laskee näkyvyysalueen säteen ja reitin keston", () => {
+    expect(horizonKm(420, 5)).toBeGreaterThan(1700);
+    expect(horizonKm(420, 5)).toBeLessThan(1800);
+    expect(horizonKm(420, 90)).toBeCloseTo(0, 5);
+    const start = "2026-11-16T16:50:00.000Z";
+    expect(trackSpan({ start, step_s: 20, points: [[0, 0], [1, 1], [2, 2]] })).toEqual([Date.parse(start), Date.parse(start) + 40_000]);
+  });
+});

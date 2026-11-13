@@ -348,6 +348,13 @@ describe("reitit", () => {
     const visible = passes.find((p) => p.visible_start?.startsWith("2026-11-16T16:5"));
     expect(visible).toBeDefined();
     expect(visible!.magnitude).toBeLessThan(0);
+    // Kartan reitti kattaa ylilennon ja vähän sen kummaltakin puolelta; näkymättömille ylilennoille sitä ei lasketa.
+    const track = visible!.track!;
+    const trackEnd = Date.parse(track.start) + (track.points.length - 1) * track.step_s * 1000;
+    expect(Date.parse(track.start)).toBeLessThan(Date.parse(visible!.start) - 170_000);
+    expect(trackEnd).toBeGreaterThan(Date.parse(visible!.end) + 170_000);
+    expect(track.points.every(([lat, lon]) => Math.abs(lat) <= 52 && Math.abs(lon) <= 180)).toBe(true);
+    expect(passes.every((p) => (p.track === null) === (p.visible_start === null))).toBe(true);
     // Oulussa asema jää matalalle etelätaivaalle.
     const oulu = findPasses(tle, 65.01, 25.47, new Date("2026-11-12T22:30:00Z"));
     expect(oulu.length).toBeGreaterThan(5);

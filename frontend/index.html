@@ -117,6 +117,17 @@
     <section class="card" id="iss">
       <h2 class="info-host" data-info-slot="iss">ISS-ylilennot</h2>
       <div id="iss-now">Ladataan…</div>
+      <div id="iss-map-box" class="iss-map-box" hidden>
+        <div class="iss-map-bar">
+          <button type="button" id="iss-prev" class="sky-btn" aria-label="Edellinen ylilento">‹</button>
+          <span id="iss-map-title" aria-live="polite"></span>
+          <button type="button" id="iss-next" class="sky-btn" aria-label="Seuraava ylilento">›</button>
+          <button type="button" id="iss-full" class="sky-btn" aria-label="Avaa kartta koko näytölle"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+          <button type="button" id="iss-close" class="sky-btn" aria-label="Sulje koko näytön tila">✕</button>
+        </div>
+        <div class="iss-map-stage"><canvas id="iss-map" class="iss-map" role="img" aria-label="Ylilennon reitti kartalla"></canvas></div>
+        <div id="iss-map-meta" class="muted">Paksu viiva: asema näkyy · ohut viiva: taivaalla mutta ei näy · katkoviiva: rata ennen ja jälkeen · ympyrän sisällä asema on yli 5° korkeudella</div>
+      </div>
       <ol id="iss-passes" class="event-list"></ol>
       <div id="iss-notify" class="favorite-options"></div>
       <div id="iss-meta" class="muted"></div>

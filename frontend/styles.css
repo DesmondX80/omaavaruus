@@ -161,6 +161,27 @@ body.sky-locked { overflow: hidden; }
 .favorite-options:empty { display: none; }
 .favorite-options small { color: var(--muted); }
 #iss .favorite-options { margin: 4px 0 8px; }
+#iss-passes li { display: block; padding: 0; }
+.pass-pick { display: grid; grid-template-columns: 76px 1fr; gap: 8px; width: 100%; padding: 9px 0 9px 6px; border: 0; border-left: 3px solid transparent; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pass-pick[aria-pressed="true"] { border-left-color: var(--warm); background: #121a2e; }
+.pass-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.iss-map-box { margin: 10px 0 4px; }
+.iss-map-box[hidden] { display: none; }
+.iss-map-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.iss-map-bar .sky-btn { display: inline-flex; align-items: center; min-height: 28px; }
+.iss-map-bar :disabled { opacity: .4; cursor: default; }
+#iss-map-title { flex: 1; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.iss-map-stage { position: relative; width: 100%; max-width: 360px; aspect-ratio: 1; margin: 0 auto 6px; }
+.iss-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+#iss-close { display: none; }
+/* Koko näytön tila kuten taivaankartalla: kortista jää näkyviin vain kartta. */
+#iss.iss-full { position: fixed; inset: 0; z-index: 50; margin: 0; border-radius: 0; border: 0; display: flex; flex-direction: column;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); overflow: hidden; }
+#iss.iss-full > :not(.iss-map-box) { display: none; }
+#iss.iss-full .iss-map-box { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; }
+#iss.iss-full .iss-map-stage { flex: 1; min-height: 0; max-width: none; aspect-ratio: auto; }
+#iss.iss-full #iss-full { display: none; }
+#iss.iss-full #iss-close { display: inline-flex; }
 .launch-list { list-style: none; margin: 0; padding: 0; }
 .launch-list li { border-top: 1px solid var(--line); padding: 9px 0; display: grid; grid-template-columns: 1fr auto; gap: 4px; }
 .launch-list small { color: var(--muted); display: block; }

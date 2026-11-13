@@ -2,7 +2,7 @@
 import { state, el } from './core.js';
 import { events } from './events.js';
 import { initInfo } from './info.js';
-import { iss } from './iss.js';
+import { iss, initIss } from './iss.js';
 import { launches, renderLaunches } from './launches.js';
 import { initPlaces } from './places.js';
 import { initPush, renderPush } from './push.js';
@@ -12,7 +12,7 @@ import { weather } from './weather.js';
 
 function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); renderLaunches();}
 
-initInfo(); initSky(); clock(); setInterval(clock,1000);
+initInfo(); initSky(); initIss(); clock(); setInterval(clock,1000);
 el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
 launches();
 initPush();
