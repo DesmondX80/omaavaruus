@@ -254,6 +254,14 @@ body.sky-locked { overflow: hidden; }
 .favorite-options small { color: var(--muted); }
 .favorite-options input { accent-color: var(--accent); }
 
+/* Yövalaistus: koko sivu punaiseksi ja himmeäksi, jotta pimeään tottuneet silmät eivät häikäisty. Yksi suodatin juurielementissä
+   kattaa myös kartat, kaaviot ja kamerakuvan. Juurielementin suodatin ei riko kiinteästi sijoitettuja palkkeja, mutta selaimen
+   koko näytön tila piirretään sen ulkopuolelle, joten sille sama suodatin erikseen. */
+html.nightvision, html.nightvision :fullscreen { filter: grayscale(1) brightness(.6) sepia(1) hue-rotate(-50deg) saturate(10) brightness(.7); }
+html.nightvision :fullscreen::backdrop { background: #000; }
+html.nightvision { background: #000; }
+#night-toggle[aria-pressed="true"] { border-color: #ff5a4a; color: #ff5a4a; }
+
 @media (min-width: 900px) {
   .nav { inset: 0 auto 0 0; width: var(--rail); flex-direction: column; gap: 4px; padding: 68px 12px 12px; border-top: 0; border-right: 1px solid var(--line); }
   .nav a { flex: none; grid-template-columns: 22px 1fr; justify-items: start; gap: 12px; height: 44px; padding: 0 12px; border-radius: 10px; font-size: 15px; }

@@ -6,6 +6,7 @@ import { initInfo } from './info.js';
 import { iss, initIss } from './iss.js';
 import { launches } from './launches.js';
 import { initNav, VIEWS } from './nav.js';
+import { initNight } from './night.js';
 import { initNow } from './now.js';
 import { initPlaces } from './places.js';
 import { initPush, renderPush } from './push.js';
@@ -14,7 +15,7 @@ import { initSky, sky } from './sky.js';
 import { redrawMap, solarwind } from './solarwind.js';
 import { auroraHistory, weather } from './weather.js';
 
-initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initIss(); initNav();
+initNight(); initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initIss(); initNav();
 setInterval(tickCountdowns,1000);
 el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
 launches();

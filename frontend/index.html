@@ -25,6 +25,7 @@
     <symbol id="i-planet" viewBox="0 0 24 24"><circle cx="9" cy="14" r="5"/><circle cx="18" cy="7" r="2.5"/></symbol>
     <symbol id="i-eclipse" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 000 16 10 10 0 010-16z"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   </svg>
 
@@ -32,6 +33,7 @@
     <div class="top-in">
       <div class="brand">OmaAvaruus</div>
       <button type="button" id="place-toggle" class="chip-btn" aria-haspopup="dialog" aria-label="Vaihda paikka"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg><span id="place-name"></span></button>
+      <button type="button" id="night-toggle" class="icon-btn" aria-pressed="false" aria-label="Yövalaistus: punainen ja himmeä näyttö pimeässä"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg></button>
       <button type="button" id="notify-toggle" class="icon-btn" aria-haspopup="dialog" aria-label="Ilmoitukset" data-sheet="notify"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg><span id="notify-dot" class="on" hidden></span></button>
     </div>
     <div id="offline" class="offline" role="status" hidden></div>
