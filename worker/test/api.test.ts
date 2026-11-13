@@ -182,6 +182,8 @@ describe("reitit", () => {
   });
 
   it("laskee taivaankartan", async () => {
+    // Ratatietoja ei haeta verkosta: kartta lasketaan myös ilman avaruusasemaa.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
     const r = await get("/api/sky?lat=65&lon=25.5&at=2026-01-01T00:00:00");
     expect(r.status).toBe(200);
     const body = await r.json<any>();
@@ -192,6 +194,8 @@ describe("reitit", () => {
   });
 
   it("palauttaa tähtikuvioiden viivat kartan tähtien niminä", async () => {
+    // Ratatietoja ei haeta verkosta: kartta lasketaan myös ilman avaruusasemaa.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
     const body = await (await get("/api/sky?lat=65&lon=25.5&at=2026-01-01T00:00:00")).json<any>();
     const names = new Set(body.objects.map((o: any) => o.name));
     const plough = body.constellations.find((c: any) => c.name === "Iso karhu");
