@@ -79,7 +79,10 @@ describe("ISS-ylilennon kartta", async () => {
     // Itä on oikealla; 60° leveydellä pituusaste on puolet päiväntasaajan asteesta.
     expect(project(60, 25, 60, 26)[0]).toBeCloseTo(55.6, 0);
     expect(project(0, 179, 0, -179)[0]).toBeCloseTo(222.4, 0);
-    expect(project(60, 25, 60, 25)).toEqual([0, 0]);
+    expect(project(60, 25, 60, 25)).toEqual([0, 0, 1]);
+    // Kolmas arvo kertoo, onko paikka pallon näkyvällä puolella.
+    expect(project(60, 25, -60, -155)[2]).toBeCloseTo(-1, 9);
+    expect(project(0, 0, 0, 90)[2]).toBeCloseTo(0, 9);
   });
 
   it("laskee näkyvyysalueen säteen ja reitin keston", () => {

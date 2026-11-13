@@ -172,7 +172,7 @@ body.sky-locked { overflow: hidden; }
 .iss-map-bar :disabled { opacity: .4; cursor: default; }
 #iss-map-title { flex: 1; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .iss-map-stage { position: relative; width: 100%; max-width: 360px; aspect-ratio: 1; margin: 0 auto 6px; }
-.iss-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; touch-action: pan-y; }
+.iss-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; touch-action: pan-y; cursor: grab; }
 .iss-map-modes, .iss-map-zoom { position: absolute; display: flex; gap: 4px; }
 .iss-map-modes { top: 8px; left: 8px; }
 .iss-map-zoom { right: 8px; bottom: 8px; flex-direction: column; }

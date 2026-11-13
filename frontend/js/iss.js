@@ -14,9 +14,12 @@ let data=null, selected=null;
 // Säde on kartan lyhyemmän sivun puolikas kilometreinä, kummallekin näkymälle omansa.
 let mode='station';
 const radius={station:5000, pass:2400};
-const RADIUS_MIN=300, RADIUS_MAX=6000;
+// Maapallon säde on 6 371 km: suurimmalla säteellä koko pallo mahtuu karttaan.
+const RADIUS_MIN=300, RADIUS_MAX=7200;
+// Käyttäjän raahaama keskipiste; null, kun kartta seuraa asemaa tai on keskitetty havaintopaikkaan.
+let pan=null, drawQueued=false;
 const LEGEND={
-  station: 'Viiva: aseman rata seuraavan kierroksen ajan, kellonajat kertovat missä asema silloin on · ympyrän sisältä asema näkyy yli 5° korkeudella · sininen piste: havaintopaikka',
+  station: 'Viiva: aseman rata seuraavan kierroksen ajan, kellonajat kertovat missä asema silloin on · ympyrän sisältä asema näkyy yli 5° korkeudella · sininen piste: havaintopaikka · pyöritä raahaamalla',
   pass: 'Paksu viiva: asema näkyy · ohut viiva: taivaalla mutta ei näy · katkoviiva: rata ennen ja jälkeen · ympyrän sisällä asema on yli 5° korkeudella',
 };
 
@@ -25,7 +28,10 @@ const selectedPass = () => visiblePasses().find(x=>x.start===selected) ?? null;
 // Aseman paikka juuri nyt radan näytteiden väliltä; ilman rataa (tai vanhentuneella radalla) viimeksi haettu sijainti.
 const stationNow = () => (data.orbit && trackLatLon(data.orbit,Date.now())) ?? {lat:data.position.lat, lon:data.position.lon};
 
+const viewCenter = () => pan ?? (mode==='pass' ? {lat:state.lat, lon:state.lon} : stationNow());
+
 function drawMap() {
+  drawQueued=false;
   if(!data) return;
   const passes=visiblePasses(), pass=selectedPass(), i=passes.indexOf(pass);
   if(!pass) mode='station';
@@ -42,17 +48,31 @@ function drawMap() {
   }
   el('iss-zoom-in').disabled=radius[mode]<=RADIUS_MIN; el('iss-zoom-out').disabled=radius[mode]>=RADIUS_MAX;
   paintMap(el('iss-map'),{
-    center:onPass ? observer : station, radiusKm:radius[mode], observer, station, circle:onPass ? 'observer' : 'station',
+    center:viewCenter(), radiusKm:radius[mode], observer, station, circle:onPass ? 'observer' : 'station',
     orbit:onPass ? null : data.orbit ?? null, pass:onPass ? pass : null, heightKm:data.position.height_km, time:hhmm,
   });
 }
 
-function setMode(next) { mode=next; drawMap(); }
+// Eleen aikana piirretään enintään kerran ruudunpäivitystä kohti.
+function queueDraw() { if(!drawQueued) {drawQueued=true; requestAnimationFrame(drawMap);} }
 
-function zoomTo(km) { radius[mode]=Math.max(RADIUS_MIN,Math.min(RADIUS_MAX,km)); drawMap(); }
+// Näkymän valinta (myös jo valitun) keskittää kartan takaisin asemaan tai havaintopaikkaan.
+function setMode(next) { mode=next; pan=null; drawMap(); }
+
+function zoomTo(km) { radius[mode]=Math.max(RADIUS_MIN,Math.min(RADIUS_MAX,km)); queueDraw(); }
+
+// Raahaus pyörittää palloa: kartan kohta seuraa sormea keskipisteen kohdalla. Pohjoinen pysyy ylhäällä.
+function panBy(dx, dy) {
+  if(!data) return;
+  const canvas=el('iss-map'), c=viewCenter(), pxPerDeg=Math.min(canvas.clientWidth,canvas.clientHeight)/2/radius[mode]*111.19;
+  const lat=Math.max(-90,Math.min(90,c.lat+dy/pxPerDeg));
+  const lon=c.lon-dx/pxPerDeg/Math.max(0.15,Math.cos(lat*Math.PI/180));
+  pan={lat, lon:((lon+540)%360+360)%360-180};
+  queueDraw();
+}
 
 function select(start, reveal=false) {
-  selected=start; mode='pass';
+  selected=start; mode='pass'; pan=null;
   for(const b of el('iss-passes').querySelectorAll('.pass-pick')) b.setAttribute('aria-pressed',String(b.dataset.start===selected));
   drawMap();
   if(reveal&&!isFull()) el('iss-map-box').scrollIntoView({block:'nearest',behavior:'smooth'});
@@ -80,18 +100,30 @@ function closeFull(fromHistory=false) {
   drawMap();
 }
 
-// Nipistys zoomaa: kahden sormen etäisyyden muutos suhteutetaan säteeseen eleen alussa.
-function initPinch(canvas) {
-  const fingers=new Map(); let base=null;
-  const spread=()=>{const [a,b]=[...fingers.values()]; return Math.hypot(a.x-b.x,a.y-b.y);};
-  const track=e=>fingers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-  canvas.addEventListener('pointerdown',e=>{track(e); base=fingers.size===2 ? {spread:spread(), radius:radius[mode]} : null;});
+// Kartan eleet: yhdellä sormella tai hiirellä raahaus pyörittää palloa, kahdella sormella nipistys zoomaa ja siirto pyörittää.
+// Kortissa pystysuuntainen pyyhkäisy vierittää sivua (CSS touch-action), koko näytössä kartta liikkuu joka suuntaan.
+function initGestures(canvas) {
+  const fingers=new Map(); let last=null, moved=false;
+  const measure=()=>{
+    const p=[...fingers.values()], x=p.reduce((sum,f)=>sum+f.x,0)/p.length, y=p.reduce((sum,f)=>sum+f.y,0)/p.length;
+    return {x, y, spread:p.length>1 ? Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y) : 0};
+  };
+  canvas.addEventListener('pointerdown',e=>{
+    canvas.setPointerCapture?.(e.pointerId);
+    fingers.set(e.pointerId,{x:e.clientX,y:e.clientY}); last=measure(); moved=false;
+  });
   canvas.addEventListener('pointermove',e=>{
     if(!fingers.has(e.pointerId)) return;
-    track(e);
-    if(base&&fingers.size===2&&spread()>10) zoomTo(base.radius*base.spread/spread());
+    fingers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    const now=measure();
+    // Pieni tärähdys napautuksessa ei vielä irrota karttaa aseman seurannasta.
+    if(!moved && Math.hypot(now.x-last.x,now.y-last.y)<4 && Math.abs(now.spread-last.spread)<4) return;
+    moved=true;
+    if(last.spread>10&&now.spread>10) radius[mode]=Math.max(RADIUS_MIN,Math.min(RADIUS_MAX,radius[mode]*last.spread/now.spread));
+    panBy(now.x-last.x,now.y-last.y);
+    last=now;
   });
-  for(const type of ['pointerup','pointercancel','pointerleave']) canvas.addEventListener(type,e=>{fingers.delete(e.pointerId); base=null;});
+  for(const type of ['pointerup','pointercancel']) canvas.addEventListener(type,e=>{fingers.delete(e.pointerId); last=fingers.size ? measure() : null; moved=false;});
 }
 
 export function initIss() {
@@ -102,7 +134,7 @@ export function initIss() {
   for(const b of el('iss-map-box').querySelectorAll('[data-map-mode]')) b.addEventListener('click',()=>setMode(b.dataset.mapMode));
   el('iss-zoom-in').addEventListener('click',()=>zoomTo(radius[mode]/1.5));
   el('iss-zoom-out').addEventListener('click',()=>zoomTo(radius[mode]*1.5));
-  initPinch(el('iss-map'));
+  initGestures(el('iss-map'));
   // Rulla zoomaa vain koko näytössä; kortissa se vierittää sivua kuten muuallakin.
   el('iss-map').addEventListener('wheel',e=>{if(!isFull()) return; e.preventDefault(); zoomTo(radius[mode]*Math.exp(e.deltaY*0.0015));},{passive:false});
   window.addEventListener('popstate',()=>closeFull(true));

@@ -1,17 +1,27 @@
-// ISS-kartta: aseman sijainti ja maanpäällinen reitti joko aseman tai havaintopaikan ympäristössä.
-// Projektio on kartan keskipisteeseen keskitetty keskipituinen tasoprojektio: etäisyys ja suunta keskipisteestä ovat oikein, pohjoinen on ylhäällä.
+// ISS-kartta: aseman sijainti ja maanpäällinen reitti maapallolla, jota voi pyörittää ja zoomata.
+// Projektio on ortografinen (maapallo kaukaa katsottuna), pohjoinen ylhäällä: lähelle zoomattuna se vastaa tavallista karttaa.
 import { LAND } from './land.js';
 
 const R_EARTH = 6371, RAD = Math.PI/180, MIN = 60000;
-// Keskipisteen vastakkaisella puolella maapalloa projektio venyy äärettömiin: sinne osuvia reitin pisteitä ei piirretä.
-const FAR_KM = 15000;
 
-/** Paikan (lat, lon) sijainti kilometreinä itään ja pohjoiseen keskipisteestä (lat0, lon0). */
+/**
+ * Paikan (lat, lon) sijainti kilometreinä itään ja pohjoiseen kartan keskipisteestä (lat0, lon0).
+ * Kolmas arvo on keskipisteestä mitatun kulmaetäisyyden kosini: negatiivinen, kun paikka on maapallon takapuolella.
+ */
 export function project(lat0, lon0, lat, lon) {
   const p0=lat0*RAD, p=lat*RAD, dl=(lon-lon0)*RAD;
-  const cosC=Math.sin(p0)*Math.sin(p)+Math.cos(p0)*Math.cos(p)*Math.cos(dl);
-  const c=Math.acos(Math.max(-1,Math.min(1,cosC))), k=c<1e-9 ? 1 : c/Math.sin(c);
-  return [R_EARTH*k*Math.cos(p)*Math.sin(dl), R_EARTH*k*(Math.cos(p0)*Math.sin(p)-Math.sin(p0)*Math.cos(p)*Math.cos(dl))];
+  return [
+    R_EARTH*Math.cos(p)*Math.sin(dl),
+    R_EARTH*(Math.cos(p0)*Math.sin(p)-Math.sin(p0)*Math.cos(p)*Math.cos(dl)),
+    Math.sin(p0)*Math.sin(p)+Math.cos(p0)*Math.cos(p)*Math.cos(dl),
+  ];
+}
+
+// Piste suunnassa bearing (radiaaneina pohjoisesta itään) kulmaetäisyydellä dist paikasta (lat, lon).
+function destination(lat, lon, bearing, dist) {
+  const p=lat*RAD, sinP=Math.sin(p)*Math.cos(dist)+Math.cos(p)*Math.sin(dist)*Math.cos(bearing);
+  const dl=Math.atan2(Math.sin(bearing)*Math.sin(dist)*Math.cos(p), Math.cos(dist)-Math.sin(p)*sinP);
+  return [Math.asin(Math.max(-1,Math.min(1,sinP)))/RAD, lon+dl/RAD];
 }
 
 /** Etäisyys maata pitkin kohtaan, jonka yllä korkeudella heightKm lentävä asema näkyy annetulla korkeuskulmalla. */
@@ -61,29 +71,34 @@ function section(xy, track, from, to) {
   return [trackPoint(xy,track,from), ...xy.filter((_,i)=>first+i*step>from && first+i*step<to), trackPoint(xy,track,to)];
 }
 
-// Mantereet kilometreinä keskipisteestä. Kaukana olevat renkaat jätetään pois. Rengas, jonka sisään jää
-// keskipisteen vastapiste, kääntyy projektiossa nurin (sen "sisäpuoli" on kartan reunaa kohti): se merkitään,
-// jotta täyttö voidaan kääntää takaisin koko maapallon ympyrällä.
-let landKey='', landKm=[];
-function land(lat0, lon0, cullKm) {
-  const key=`${lat0.toFixed(2)},${lon0.toFixed(2)},${Math.round(cullKm/100)}`;
-  if(key===landKey) return landKm;
-  landKm=[];
+const wrapAngle = a => Math.atan2(Math.sin(a),Math.cos(a));
+
+// Mantereiden ääriviivat polkuna. Takapuolelle jäävät pisteet siirretään samassa suunnassa pallon reunalle ja
+// niiden välit piirretään reunaa pitkin, jolloin täyttö rajautuu näkyvään puoliskoon.
+// Rengas, jonka sisään jää keskipisteen vastapiste, kiertää reunan kokonaan ja täyttyisi nurinpäin:
+// täyttö käännetään takaisin lisäämällä polkuun koko pallon ympyrä (parillinen–pariton-täyttö).
+function landPath(ctx, center, cx, cy, k) {
+  const limb=R_EARTH*k;
   for(const ring of LAND) {
-    const pts=[]; let near=false, total=0, turn=0, prev=null;
+    const pts=[]; let front=false, turn=0, far=0;
     for(let i=0;i<ring.length;i+=2) {
-      const p=project(lat0,lon0,ring[i+1]/2,ring[i]/2), d=Math.hypot(p[0],p[1]), a=Math.atan2(p[1],p[0]);
-      near ||= d<cullKm; total+=d;
-      if(prev!==null) turn+=Math.atan2(Math.sin(a-prev),Math.cos(a-prev));
-      prev=a; pts.push(p);
+      const [e,n,cosC]=project(center.lat,center.lon,ring[i+1]/2,ring[i]/2), a=Math.atan2(n,e);
+      if(pts.length) turn+=wrapAngle(a-pts[pts.length-1].a);
+      front ||= cosC>=0; far+=Math.acos(Math.max(-1,Math.min(1,cosC)));
+      pts.push({e,n,a,back:cosC<0});
     }
-    if(!near) continue;
+    if(!front) continue;
+    pts.forEach((p,i)=>{
+      const prev=pts[i-1], x=p.back ? cx+limb*Math.cos(p.a) : cx+p.e*k, y=p.back ? cy-limb*Math.sin(p.a) : cy-p.n*k;
+      if(!i) ctx.moveTo(x,y);
+      // Ruudulla y kasvaa alaspäin, joten kulmat kääntyvät vastakkaisiksi.
+      else if(p.back&&prev.back) ctx.arc(cx,cy,limb,-prev.a,-p.a,wrapAngle(p.a-prev.a)>0);
+      else ctx.lineTo(x,y);
+    });
+    ctx.closePath();
     // Keskipisteen ympäri kiertävä rengas sulkee sisäänsä joko keskipisteen tai vastapisteen; kaukana oleva rengas jälkimmäisen.
-    pts.inverted=Math.abs(turn)>Math.PI && total/pts.length>Math.PI*R_EARTH/2;
-    landKm.push(pts);
+    if(Math.abs(turn)>Math.PI && far/pts.length>Math.PI/2) {ctx.moveTo(cx+limb,cy); ctx.arc(cx,cy,limb,0,2*Math.PI);}
   }
-  landKey=key;
-  return landKm;
 }
 
 // Mittakaavajanalle pyöreä pituus, joka on enintään noin neljännes kartan leveydestä.
@@ -91,7 +106,7 @@ const scaleKm = maxKm => [5000,2000,1000,500,200,100].find(v=>v<=maxKm) ?? 50;
 
 /**
  * Piirtää kartan.
- * center: kartan keskipiste, radiusKm: lyhyemmän sivun puolikas kilometreinä, observer: havaintopaikka ({lat, lon, label}),
+ * center: kartan keskipiste, radiusKm: lyhyemmän sivun puolikas kilometreinä kartan keskellä (maapallon säde on 6 371 km), observer: havaintopaikka ({lat, lon, label}),
  * station: aseman sijainti nyt tai null, circle: 'station' tai 'observer' sen mukaan, kumman ympärille näkyvyysalue piirretään,
  * orbit: aseman rata nykyhetken ympäriltä, pass: ylilento reitteineen, time: kellonajan muotoilu.
  */
@@ -100,18 +115,23 @@ export function drawMap(canvas, {center, radiusKm, observer, station=null, circl
   if(!w||!h) return;
   canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
   const ctx=canvas.getContext('2d'), cx=w/2, cy=h/2, k=Math.min(w,h)/2/radiusKm;
-  const px=([e,n])=>[cx+e*k, cy-n*k];
-  const toPx=(la,lo)=>{const p=project(center.lat,center.lon,la,lo); return Math.hypot(p[0],p[1])>FAR_KM ? null : px(p);};
+  // Maapallon takapuolelle jäävää paikkaa ei piirretä.
+  const toPx=(la,lo)=>{const [e,n,cosC]=project(center.lat,center.lon,la,lo); return cosC<0 ? null : [cx+e*k, cy-n*k];};
+  const limb=R_EARTH*k;
   ctx.setTransform(scale,0,0,scale,0,0);
-  ctx.fillStyle='#071022'; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#03050b'; ctx.fillRect(0,0,w,h);
+  ctx.beginPath(); ctx.arc(cx,cy,limb,0,2*Math.PI); ctx.fillStyle='#071022'; ctx.fill();
 
-  ctx.beginPath();
-  for(const ring of land(center.lat,center.lon,Math.max(3750,Math.hypot(w,h)/2/k*1.2))) {
-    ring.forEach((p,i)=>{const [x,y]=px(p); i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);});
-    ctx.closePath();
-    if(ring.inverted) {const r=Math.PI*R_EARTH*k; ctx.moveTo(cx+r,cy); ctx.arc(cx,cy,r,0,2*Math.PI);}
-  }
+  ctx.beginPath(); landPath(ctx,center,cx,cy,k);
   ctx.fillStyle='#1a2236'; ctx.fill('evenodd'); ctx.strokeStyle='#33405f'; ctx.lineWidth=0.6; ctx.stroke();
+
+  // Asteverkko 30° välein antaa pallolle muodon.
+  ctx.beginPath();
+  const grid=(la,lo,pen)=>{const p=toPx(la,lo); if(!p) return false; pen ? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1]); return true;};
+  for(let la=-60;la<=60;la+=30) {let pen=false; for(let lo=-180;lo<=180;lo+=5) pen=grid(la,lo,pen);}
+  for(let lo=-180;lo<180;lo+=30) {let pen=false; for(let la=-85;la<=85;la+=5) pen=grid(la,lo,pen);}
+  ctx.strokeStyle='rgba(139,154,192,.13)'; ctx.lineWidth=0.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,limb,0,2*Math.PI); ctx.strokeStyle='#2a3858'; ctx.lineWidth=1; ctx.stroke();
 
   ctx.font='11px system-ui, sans-serif'; ctx.lineJoin='round';
   const label=(text,x,y,color,align='center')=>{
@@ -139,10 +159,11 @@ export function drawMap(canvas, {center, radiusKm, observer, station=null, circl
   const site=toPx(observer.lat,observer.lon), iss=station ? toPx(station.lat,station.lon) : null;
   // Ympyrän sisällä asema on havaitsijan taivaalla vähintään ylilennon rajakorkeudella.
   // Aseman ympärille piirrettynä sama ympyrä rajaa alueen, jolta asema näkyy.
-  const ring=circle==='station' ? iss : site;
-  if(ring) {
-    ctx.beginPath(); ctx.arc(ring[0],ring[1],horizonKm(heightKm,minElevation)*k,0,2*Math.PI);
-    ctx.strokeStyle='rgba(94,214,255,.5)'; ctx.lineWidth=1; ctx.setLineDash([3,4]); ctx.stroke(); ctx.setLineDash([]);
+  const around=circle==='station' ? station : observer;
+  if(around) {
+    const reach=horizonKm(heightKm,minElevation)/R_EARTH, edge=[];
+    for(let i=0;i<=72;i++) edge.push(toPx(...destination(around.lat,around.lon,i*5*RAD,reach)));
+    path(edge,'rgba(94,214,255,.5)',1,[3,4]);
   }
 
   if(orbit) {
@@ -178,6 +199,8 @@ export function drawMap(canvas, {center, radiusKm, observer, station=null, circl
   }
 
   label('P ↑',w-8,16,'#8b9ac0','right');
+  // Mittakaava pätee kartan keskellä; koko pallon näkymässä reunat lyhenevät liikaa, jotta jana kertoisi mitään.
+  if(radiusKm>3500) return;
   const km=scaleKm(w/4/k), len=km*k;
   ctx.beginPath(); ctx.moveTo(10,h-14); ctx.lineTo(10,h-10); ctx.lineTo(10+len,h-10); ctx.lineTo(10+len,h-14);
   ctx.strokeStyle='#8b9ac0'; ctx.lineWidth=1; ctx.stroke();
