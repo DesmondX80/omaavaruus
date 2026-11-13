@@ -1,4 +1,4 @@
-import { getCloudCover, type CloudCover } from "./clouds";
+import { cloudCoverOrNull, type CloudCover } from "./clouds";
 import { asRecords, cached, fetchJson } from "./http";
 import { getOvation, OVATION_URL, ovationAt, ovationLevel, type OvationPoint } from "./ovation";
 import { skyLight, type SkyLight } from "./sky";
@@ -241,10 +241,7 @@ export async function getSpaceWeather(lat: number, lon: number) {
   // arvio tehdään silloin Kp:stä ja ilman pilvisyyttä.
   const [{ history, forecast, speed, bz, bt }, clouds, grid] = await Promise.all([
     swpcData(),
-    getCloudCover(lat, lon).catch((exc): CloudCover | null => {
-      console.warn(`Pilvisyyden haku epäonnistui: ${exc}`);
-      return null;
-    }),
+    cloudCoverOrNull(lat, lon),
     getOvation(now).catch((exc) => {
       console.warn(`OVATION-mallin haku epäonnistui: ${exc}`);
       return null;

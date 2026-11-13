@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
-import { parseFmiSimple } from "../src/clouds";
+import { cloudAt, parseFmiSimple } from "../src/clouds";
 import { getEvents } from "../src/events";
 import { findPasses, issPosition, parseTle } from "../src/iss";
 import { ISS_TLE } from "./helpers";
@@ -136,6 +136,17 @@ describe("apufunktiot", () => {
       { time_tag: "2026-11-10T14:00:00.000Z", cloud_cover: 99.5 },
       { time_tag: "2026-11-10T15:00:00.000Z", cloud_cover: 40.5 },
     ]);
+  });
+
+  it("hakee pilvisyyden ennusteen tunnilta", () => {
+    const clouds = { now: 50, provider: "x", source: "x", forecast: [
+      { time_tag: "2026-11-16T16:00:00.000Z", cloud_cover: 95 },
+      { time_tag: "2026-11-16T17:00:00.000Z", cloud_cover: 20 },
+    ] };
+    expect(cloudAt(clouds, "2026-11-16T16:51:00.000Z")).toBe(95);
+    expect(cloudAt(clouds, "2026-11-16T17:00:00.000Z")).toBe(20);
+    expect(cloudAt(clouds, "2026-11-16T18:10:00.000Z")).toBeNull();
+    expect(cloudAt(null, "2026-11-16T16:51:00.000Z")).toBeNull();
   });
 
   it("järjestää paikkaehdotukset hakusanan alun ja asukasluvun mukaan", () => {
@@ -366,6 +377,24 @@ describe("reitit", () => {
     expect(oulu.every((p) => p.max_az > 120 && p.max_az < 240)).toBe(true);
   });
 
+  it("liittää pilvisyysennusteen näkyviin ylilentoihin ja tapahtumiin", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T16:40:00Z"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.startsWith("https://opendata.fmi.fi/")) return new Response(fmiXml([["2026-11-16T16:00:00Z", "TotalCloudCover", "95"], ["2026-11-17T04:00:00Z", "TotalCloudCover", "30"]]));
+      return new Response(ISS_TLE);
+    }));
+    const iss = await (await get("/api/iss?lat=60.17&lon=24.94")).json<any>();
+    const pass = iss.passes.find((p: any) => p.visible_start?.startsWith("2026-11-16T16:5"));
+    expect(pass.cloud_cover).toBe(95);
+    expect(iss.passes.filter((p: any) => !p.visible_start).every((p: any) => p.cloud_cover === null)).toBe(true);
+    expect(iss.cloud_provider).toBe("Ilmatieteen laitos");
+    // Leonidien paras hetki 17.11. aamulla on ennusteen sisällä, myöhemmät tapahtumat eivät.
+    const events = await (await get("/api/events?lat=60.17&lon=24.94")).json<any>();
+    expect(events.events.find((e: any) => e.title === "Leonidit").cloud_cover).toBe(30);
+    expect(events.events.find((e: any) => e.title === "Geminidit").cloud_cover).toBeNull();
+  });
+
   it("palauttaa ISS-reitin ja lisää aseman taivaankartalle", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-16T16:52:00Z"));
@@ -373,6 +402,9 @@ describe("reitit", () => {
     const body = await (await get("/api/iss?lat=60.17&lon=24.94")).json<any>();
     expect(body.position.alt).toBeGreaterThan(5);
     expect(body.passes[0].visible_start).toBeTruthy();
+    // Pilvisyysennuste ei ollut saatavilla (haku palautti ratatiedot), mutta ylilennot tulevat silti.
+    expect(body.passes[0].cloud_cover).toBeNull();
+    expect(body.cloud_provider).toBeNull();
     // Rata nykyhetken kartalle: kymmenen minuuttia taaksepäin ja seuraava kierros minuutin välein.
     expect(body.orbit).toMatchObject({ start: "2026-11-16T16:42:00.000Z", step_s: 60 });
     expect(body.orbit.points.length).toBeGreaterThan(100);

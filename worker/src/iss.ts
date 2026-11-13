@@ -19,6 +19,7 @@ import {
 import { Body, Equator, Horizon, MakeTime, Observer } from "astronomy-engine";
 
 import { cached, fetchText } from "./http";
+import { cloudAt, cloudCoverOrNull } from "./clouds";
 
 const TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE";
 /** CelesTrak päivittää ratatiedot muutaman kerran vuorokaudessa ja pyytää, ettei samaa hakua tehdä tiheämmin kuin kahden tunnin välein. */
@@ -303,7 +304,7 @@ export async function issSkyDetail(lat: number, lon: number, at: Date) {
 
 /** ISS-kortin tiedot: sijainti nyt ja näkyvät ylilennot seuraavien päivien ajalta. */
 export async function getIss(lat: number, lon: number, now = new Date()) {
-  const tle = await getTle(now);
+  const [tle, clouds] = await Promise.all([getTle(now), cloudCoverOrNull(lat, lon, now)]);
   // Ylilennot ovat samat noin kymmenen kilometrin säteellä; pyöristys jakaa välimuistin lähekkäisille paikoille.
   const la = round(lat, 1), lo = round(lon, 1);
   const slot = Math.floor(now.getTime() / (PASSES_TTL_S * 1000));
@@ -312,6 +313,8 @@ export async function getIss(lat: number, lon: number, now = new Date()) {
     tle_epoch: tle.epoch,
     position: issPosition(tle, lat, lon, now),
     orbit: issOrbit(tle, now),
-    passes: passes.filter((p) => Date.parse(p.end) > now.getTime()),
+    // Pilvisyys näkyvän osuuden alkuhetkelle, kun se on ennusteen sisällä (null muuten tai jos ennustetta ei saatu).
+    passes: passes.filter((p) => Date.parse(p.end) > now.getTime()).map((p) => ({ ...p, cloud_cover: p.visible_start ? cloudAt(clouds, p.visible_start) : null })),
+    cloud_provider: clouds?.provider ?? null,
   };
 }

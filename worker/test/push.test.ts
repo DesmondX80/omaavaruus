@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "../src/index";
+import { clearCache } from "../src/http";
 import { resetLaunchState } from "../src/launches";
 import { checkSubscriptions, launchesToNotify, passesToNotify, shouldNotify, type Subscription } from "../src/push";
 import { ISS_TLE } from "./helpers";
@@ -13,6 +14,8 @@ let browserKeys: { p256dh: string; auth: string };
 let pushStatus = 201;
 let pushCalls: { url: string; headers: Headers; bytes: number; body: Uint8Array }[] = [];
 let browserPrivate: CryptoKey;
+/** FMI:n pilvisyysennusteen piste: oletuksena selkeä yö, jona revontuliarvio on "Erittäin hyvä". */
+let fmiCloud = { time: "2026-11-08T23:00:00Z", value: 10 };
 
 const post = (path: string, body: unknown) =>
   worker.fetch(new Request(`https://api.test${path}`, { method: "POST", body: JSON.stringify(body) }), env);
@@ -62,6 +65,9 @@ beforeEach(async () => {
   };
   pushStatus = 201;
   pushCalls = [];
+  fmiCloud = { time: "2026-11-08T23:00:00Z", value: 10 };
+  // Haut (pilvisyys, ratatiedot) välimuistissa edellisestä testistä peittäisivät testin oman syötteen.
+  clearCache();
   resetLaunchState();
   // Pimeä yö lähellä uuttakuuta, Kp 5,33 ja selkeä taivas: Oulussa arvio on "Erittäin hyvä".
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -86,8 +92,8 @@ beforeEach(async () => {
       if (url.endsWith("noaa-planetary-k-index.json")) return Response.json([{ time_tag: "2026-11-08T21:00:00", Kp: 5.33 }]);
       if (url.startsWith("https://opendata.fmi.fi/")) {
         return new Response(
-          `<BsWfs:BsWfsElement gml:id="x"><BsWfs:Time>2026-11-08T23:00:00Z</BsWfs:Time>` +
-            `<BsWfs:ParameterName>TotalCloudCover</BsWfs:ParameterName><BsWfs:ParameterValue>10</BsWfs:ParameterValue></BsWfs:BsWfsElement>`,
+          `<BsWfs:BsWfsElement gml:id="x"><BsWfs:Time>${fmiCloud.time}</BsWfs:Time>` +
+            `<BsWfs:ParameterName>TotalCloudCover</BsWfs:ParameterName><BsWfs:ParameterValue>${fmiCloud.value}</BsWfs:ParameterValue></BsWfs:BsWfsElement>`,
         );
       }
       return Response.json([]);
@@ -222,8 +228,19 @@ describe("ilmoitusten ajastettu tarkistus", () => {
     const result = await checkSubscriptions(env);
     expect(result.iss_sent).toBe(1);
     expect(stored()[0].iss_notified).toHaveLength(1);
-    expect(await decrypt(pushCalls[0].body)).toMatchObject({ tag: "iss-2026-11-16T16:51:00.000Z", view: "iss" });
+    const message = await decrypt(pushCalls[0].body);
+    expect(message).toMatchObject({ tag: "iss-2026-11-16T16:51:00.000Z", view: "iss" });
+    // Ennusteessa ei ole pilvisyyttä ylilennon tunnille, joten siitä ei mainita.
+    expect(message.body).not.toContain("Ennuste");
     expect((await checkSubscriptions(env)).iss_sent).toBe(0);
+  });
+
+  it("mainitsee pilvisyyden ISS-ilmoituksessa", async () => {
+    vi.setSystemTime(new Date("2026-11-16T16:40:00Z"));
+    fmiCloud = { time: "2026-11-16T16:00:00Z", value: 95 };
+    await post("/api/push/subscribe", subscribeBody({ lat: 60.17, lon: 24.94, place: "Helsinki", threshold: "Erittäin hyvä", iss: true }));
+    expect((await checkSubscriptions(env)).iss_sent).toBe(1);
+    expect((await decrypt(pushCalls[0].body)).body).toContain("Ennuste: pilvistä (95 %).");
   });
 
   it("hylkää virheellisen suosikkilistan", async () => {

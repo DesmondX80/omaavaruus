@@ -62,3 +62,14 @@ export function row({tag='div', href, kind='', iconName, title, details=[], when
   return node;
 }
 export const dayLabel = t => new Date(t).toLocaleDateString('fi-FI',{weekday:'short',day:'numeric',month:'numeric'});
+
+// Pilvisyysennuste tapahtumariville: sama sanallinen asteikko kuin palvelimella (spaceweather.ts, cloudLabel).
+// Paksu pilvipeite korostetaan, koska kohde ei silloin todennäköisesti näy. null, kun ennustetta ei ole.
+const CLOUD_LABELS = [[15,'selkeää'],[40,'melko selkeää'],[70,'puolipilvistä'],[90,'melko pilvistä'],[101,'pilvistä']];
+export function cloudNote(pct) {
+  if(pct==null) return null;
+  const small=document.createElement('small'), label=CLOUD_LABELS.find(([limit])=>pct<limit)[1];
+  small.className=pct>=70 ? 'warn' : '';
+  small.textContent=`Ennuste: ${label} (${Math.round(pct)} %)${pct>=90 ? ', ei todennäköisesti näy' : ''}`;
+  return small;
+}

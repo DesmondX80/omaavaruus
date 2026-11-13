@@ -2,7 +2,8 @@
 import { HttpError } from "./http";
 import { findPasses, getTle, type Pass } from "./iss";
 import { getLaunches, type Launch } from "./launches";
-import { CHANCE_LEVELS, getSpaceWeather } from "./spaceweather";
+import { cloudAt, cloudCoverOrNull } from "./clouds";
+import { CHANCE_LEVELS, cloudLabel, getSpaceWeather } from "./spaceweather";
 import { generateVapidKeys, sendPush, type PushTarget, type VapidKeys } from "./webpush";
 
 export interface PushEnv {
@@ -42,6 +43,8 @@ const MAX_PROVIDERS = 20;
 const MAX_NOTIFIED = 20;
 /** Näkyvästä ISS-ylilennosta ilmoitetaan, kun sen alkuun on enintään tämän verran (cron ajetaan 15 minuutin välein). */
 const ISS_LEAD_MS = 20 * 60_000;
+/** Pilvisyys (%), josta alkaen ISS-ilmoitukseen lisätään maininta: asema näkyy ohuen pilviverhon läpi, mutta ei paksun. */
+const CLOUDY_PCT = 70;
 const ISS_DIRECTIONS = ["pohjoisesta", "koillisesta", "idästä", "kaakosta", "etelästä", "lounaasta", "lännestä", "luoteesta"];
 /** Revontulitilanne vanhenee nopeasti: push-palvelu saa yrittää toimitusta tunnin. */
 const TTL_S = 3600;
@@ -270,9 +273,15 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
       for (const pass of passesToNotify(sub, passesAt.get(place)!, now.getTime())) {
         const minutes = Math.round((Date.parse(pass.visible_start!) - now.getTime()) / 60_000);
         const from = ISS_DIRECTIONS[Math.round(pass.start_az / 45) % 8];
+        // Pilvisyysennuste on jo haettu revontuliarviota varten, joten se tulee välimuistista.
+        const cloud = cloudAt(await cloudCoverOrNull(sub.lat, sub.lon, now), pass.visible_start!);
         const ok = await deliver(env, key, sub, {
           title: `ISS näkyy noin ${minutes} min kuluttua – ${sub.place}`,
-          body: `Asema nousee ${from} ja käy ${pass.max_alt}° korkeudella.${pass.magnitude === null ? "" : ` Kirkkaus noin ${pass.magnitude.toLocaleString("fi-FI")} mag.`}`,
+          body: [
+            `Asema nousee ${from} ja käy ${pass.max_alt}° korkeudella.`,
+            pass.magnitude === null ? "" : `Kirkkaus noin ${pass.magnitude.toLocaleString("fi-FI")} mag.`,
+            cloud !== null && cloud >= CLOUDY_PCT ? `Ennuste: ${cloudLabel(cloud).toLowerCase()} (${Math.round(cloud)} %).` : "",
+          ].filter(Boolean).join(" "),
           tag: `iss-${pass.visible_start}`,
           view: "iss",
         });

@@ -1,5 +1,5 @@
 // Nyt-kooste: illan revontuliarvio, seuraavat tapahtumat ja taivaan tilanne muiden näkymien hakemista tiedoista.
-import { el, store, row, hhmm, num, dayLabel } from './core.js';
+import { el, store, row, hhmm, num, dayLabel, cloudNote } from './core.js';
 import { countdownEl, eventIcon } from './calendar.js';
 import { dir, issNowText } from './iss.js';
 import { placeLabel } from './places.js';
@@ -36,13 +36,13 @@ function renderNext() {
   const now=Date.now(), items=[];
   const pass=store.iss?.passes.find(p=>p.visible_start&&Date.parse(p.visible_end)>now);
   if(pass) items.push({time:Date.parse(pass.visible_start), node:()=>row({tag:'a', href:'#iss', iconName:'iss', title:'ISS näkyy',
-    details:[`Korkeimmillaan ${num(pass.max_alt)}° ${dir(pass.max_az)}${pass.max_alt<10 ? ' · matala' : ''}`], ...when(pass.visible_start)})});
+    details:[`Korkeimmillaan ${num(pass.max_alt)}° ${dir(pass.max_az)}${pass.max_alt<10 ? ' · matala' : ''}`, cloudNote(pass.cloud_cover)], ...when(pass.visible_start)})});
   for(const l of (store.launches?.results ?? []).filter(l=>l.net&&Date.parse(l.net)>now).slice(0,2))
     items.push({time:Date.parse(l.net), node:()=>row({tag:'a', href:'#kalenteri', kind:'launch', iconName:'rocket', title:l.name,
       details:[[l.provider,l.location].filter(Boolean).join(' · ')], ...(Date.parse(l.net)-now<DAY ? {when:countdownEl(l.net), whenSub:`klo ${hhmm(l.net)}`} : when(l.net))})});
   for(const e of (store.events?.events ?? []).filter(e=>e.visible&&Date.parse(e.best_time ?? e.time)>now).slice(0,2))
     items.push({time:Date.parse(e.best_time ?? e.time), node:()=>row({tag:'a', href:'#kalenteri', kind:'sky', iconName:eventIcon(e.title), title:e.title,
-      details:[e.visibility], ...(e.best_time ? when(e.best_time) : {when:dayLabel(e.time)})})});
+      details:[e.visibility, cloudNote(e.cloud_cover)], ...(e.best_time ? when(e.best_time) : {when:dayLabel(e.time)})})});
   const loading=!store.iss&&!store.launches&&!store.events;
   const empty=document.createElement('div'); empty.className='muted'; empty.textContent=loading ? 'Ladataan…' : 'Ei tulevia tapahtumia.';
   el('now-next').replaceChildren(...(items.length ? items.sort((a,b)=>a.time-b.time).slice(0,5).map(i=>i.node()) : [empty]));

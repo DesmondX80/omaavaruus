@@ -6,7 +6,12 @@ const STORED_QUERY = "fmi::forecast::edited::weather::scandinavia::point::simple
 /** Maailmanlaajuinen varalähde, kun FMI:llä ei ole dataa (Pohjoismaiden ulkopuolella tai katkos). */
 const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
 const TTL_S = 900;
-const FORECAST_HOURS = 24;
+/**
+ * Ennusteen pituus. Revontulten tuntiennuste käyttää ensimmäiset 24 tuntia, ISS-ylilennot ja taivaan tapahtumat koko jakson.
+ * Kaikki käyttävät samaa välimuistiavainta, joten pidempi ennuste ei lisää hakuja. Kolmea vuorokautta pidemmälle
+ * pilvisyysennuste on niin epävarma, ettei sitä näytetä.
+ */
+const FORECAST_HOURS = 72;
 
 export interface CloudPoint {
   time_tag: string;
@@ -80,6 +85,21 @@ async function openMeteoCloudCover(la: string, lo: string): Promise<CloudCover> 
     .filter((p) => !Number.isNaN(p.time.getTime()) && Number.isFinite(p.cloud_cover))
     .map((p) => ({ time_tag: p.time.toISOString(), cloud_cover: p.cloud_cover }));
   return { now, forecast, provider: "Open-Meteo", source: "https://open-meteo.com/" };
+}
+
+/** Ennustettu pilvisyys hetkellä `time`: hetken tasatunnin arvo, tai null, jos hetki on ennusteen ulkopuolella. */
+export function cloudAt(clouds: CloudCover | null, time: string | number | Date): number | null {
+  if (!clouds) return null;
+  const hour = Math.floor(new Date(time).getTime() / 3_600_000) * 3_600_000;
+  return clouds.forecast.find((p) => Date.parse(p.time_tag) === hour)?.cloud_cover ?? null;
+}
+
+/** Pilvisyysennuste, tai null, jos haku epäonnistui: puuttuva ennuste ei saa estää muita tietoja. */
+export function cloudCoverOrNull(lat: number, lon: number, now = new Date()): Promise<CloudCover | null> {
+  return getCloudCover(lat, lon, now).catch((exc) => {
+    console.warn(`Pilvisyyden haku epäonnistui: ${exc}`);
+    return null;
+  });
 }
 
 /**

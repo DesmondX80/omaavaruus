@@ -1,5 +1,5 @@
 // ISS-kortti: aseman sijainti ja rata kartalla, näkyvät ylilennot reitteineen sekä ilmoitusvalinta.
-import { state, el, json, hhmm, num, saved, row, dayLabel, publish } from './core.js';
+import { state, el, json, hhmm, num, saved, row, dayLabel, publish, cloudNote } from './core.js';
 import { drawMap as paintMap, trackLatLon } from './issmap.js';
 import { placeLabel } from './places.js';
 import { ISS_KEY, pushActive, syncPush } from './push.js';
@@ -175,13 +175,13 @@ function render() {
     const li=document.createElement('li');
     const span=hhmm(x.visible_start)===hhmm(x.visible_end) ? `hetken klo ${hhmm(x.visible_start)}` : `${hhmm(x.visible_start)}–${hhmm(x.visible_end)}`;
     const pick=row({tag:'button', iconName:'iss', title:`Korkeimmillaan ${num(x.max_alt)}° ${dir(x.max_az)}${x.max_alt<10?' · matala':''}`,
-      details:[`Näkyy ${span} · nousee ${dir(x.start_az)}, laskee ${dir(x.end_az)}${x.magnitude===null?'':` · kirkkaus noin ${num(x.magnitude,1)} mag`}`],
+      details:[`Näkyy ${span} · nousee ${dir(x.start_az)}, laskee ${dir(x.end_az)}${x.magnitude===null?'':` · kirkkaus noin ${num(x.magnitude,1)} mag`}`, cloudNote(x.cloud_cover)],
       when:dayLabel(x.visible_start), whenSub:`klo ${hhmm(x.visible_start)}`});
     pick.classList.add('pass-pick'); pick.dataset.start=x.start; pick.setAttribute('aria-pressed',String(x.start===selected));
     pick.addEventListener('click',()=>select(x.start,true));
     li.append(pick); return li;
   }) : [Object.assign(document.createElement('li'),{className:'muted',textContent:`Ei näkyviä ylilentoja viiteen vuorokauteen (ylilentoja yhteensä ${data.passes.length}, mutta asema on silloin Maan varjossa tai taivas on liian valoisa).`})]));
-  el('iss-meta').textContent=`Ratatiedot CelesTrak, epookki ${day(data.tle_epoch)} ${hhmm(data.tle_epoch)}. Ylilento alkaa ja päättyy 5° korkeudella.`;
+  el('iss-meta').textContent=`Ratatiedot CelesTrak, epookki ${day(data.tle_epoch)} ${hhmm(data.tle_epoch)}. Ylilento alkaa ja päättyy 5° korkeudella.${data.cloud_provider ? ` Pilvisyysennuste ${data.cloud_provider}, kolme vuorokautta eteenpäin.` : ''}`;
   drawMap();
 }
 

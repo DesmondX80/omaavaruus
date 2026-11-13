@@ -1,5 +1,5 @@
 // Kalenteri: taivaan tapahtumat ja laukaisut samalla aikajanalla päivittäin ryhmiteltynä.
-import { el, store, row, hhmm, fmt, button } from './core.js';
+import { el, store, row, hhmm, fmt, button, cloudNote } from './core.js';
 import { launchPrefs, toggleFavorite } from './launches.js';
 import { placeLabel } from './places.js';
 
@@ -53,7 +53,7 @@ function launchRow(l, fav) {
 function eventRow(e) {
   const visibility=document.createElement('small');
   visibility.className=e.visible ? 'ok' : ''; visibility.textContent=e.visibility+(e.best_time ? ` · paras hetki ${dayTime(e.best_time)}` : '');
-  return row({kind:'sky', iconName:eventIcon(e.title), title:e.title, details:[e.detail, visibility], when:e.visible ? 'Näkyy' : 'Ei näy', dim:!e.visible});
+  return row({kind:'sky', iconName:eventIcon(e.title), title:e.title, details:[e.detail, visibility, e.visible && cloudNote(e.cloud_cover)], when:e.visible ? 'Näkyy' : 'Ei näy', dim:!e.visible});
 }
 
 function render() {

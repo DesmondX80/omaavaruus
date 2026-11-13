@@ -1,3 +1,4 @@
+import { cloudAt, cloudCoverOrNull } from "./clouds";
 import { getEvents } from "./events";
 import { searchPlaces } from "./geocode";
 import { cached, HttpError, sharedCacheWorks } from "./http";
@@ -104,7 +105,16 @@ async function route(url: URL, env: Env): Promise<unknown> {
     case "/api/events": {
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
       const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
-      return cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()), true);
+      const [calendar, clouds] = await Promise.all([
+        cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()), true),
+        cloudCoverOrNull(lat(), lon()),
+      ]);
+      // Pilvisyys lisätään välimuistista haettuun kalenteriin, koska ennuste vanhenee paljon kalenteria nopeammin.
+      return {
+        ...calendar,
+        events: calendar.events.map((e) => ({ ...e, cloud_cover: e.best_time ? cloudAt(clouds, e.best_time) : null })),
+        cloud_provider: clouds?.provider ?? null,
+      };
     }
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();
