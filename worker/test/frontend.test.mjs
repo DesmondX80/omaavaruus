@@ -166,3 +166,20 @@ describe("ylilennon kaari taivaankartalla", async () => {
     expect(arcPoints(pass, t(200), t(300))).toEqual([]);
   });
 });
+
+describe("revontulikamerat", async () => {
+  const { distanceBearing, nearestCameras } = await import("../../frontend/js/cameras.js");
+
+  it("laskee etäisyyden ja suunnan", () => {
+    // Oulusta Sodankylään noin 270 km pohjoiseen.
+    const sod = distanceBearing({ lat: 65.01, lon: 25.47 }, { lat: 67.42, lon: 26.39 });
+    expect(sod.km).toBeCloseTo(270, -1);
+    expect(sod.direction).toBe("pohjoiseen");
+    expect(distanceBearing({ lat: 60, lon: 25 }, { lat: 60, lon: 26 }).direction).toBe("itään");
+  });
+
+  it("valitsee lähimmät kamerat", () => {
+    expect(nearestCameras({ lat: 60.17, lon: 24.94 }).map((c) => c.name)).toEqual(["Helsinki", "Metsähovi", "Nyrölä"]);
+    expect(nearestCameras({ lat: 68.9, lon: 20.9 }, 1)[0].name).toBe("Kilpisjärvi");
+  });
+});

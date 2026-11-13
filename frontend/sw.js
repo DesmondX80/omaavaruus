@@ -16,6 +16,7 @@ const SHELL = [
   "manifest.webmanifest",
   "js/main.js",
   "js/calendar.js",
+  "js/cameras.js",
   "js/core.js",
   "js/events.js",
   "js/info.js",

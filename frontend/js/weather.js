@@ -2,6 +2,7 @@
 import { state, el, json, hhmm, num, publish, row, dayLabel } from './core.js';
 import { infoBtn } from './info.js';
 import { placeLabel } from './places.js';
+import { nearestCameras } from './cameras.js';
 
 const LEVELS=['Epätodennäköinen','Mahdollinen','Hyvä','Erittäin hyvä'];
 const KP_BIN=3*3600000, KP_DAYS=2;
@@ -136,6 +137,17 @@ export async function weather() {
     drawKp(el('kp-chart'),w);
     publish('weather',{...w, fetched:Date.now()});
   } catch(e) {el('aurora').textContent=e.message;}
+}
+
+// Lähimmät revontulikamerat valitusta paikasta. Lista on kiinteä, joten se piirretään heti paikan vaihtuessa.
+export function renderCameras() {
+  el('cameras').replaceChildren(...nearestCameras({lat:state.lat, lon:state.lon}).map(c=>{
+    const node=row({tag:'a', href:c.url, iconName:'eye', title:c.name, details:[c.operator],
+      when:`${num(Math.round(c.km/10)*10)} km`, whenSub:c.km<20 ? 'aivan lähellä' : c.direction});
+    node.target='_blank'; node.rel='noopener noreferrer';
+    node.setAttribute('aria-label',`${c.name}: avaa kameran kuva (${num(Math.round(c.km/10)*10)} km ${c.direction})`);
+    return node;
+  }));
 }
 
 // Auringon tilanne: Maahan suuntautuvat CME:t (NASA DONKI, WSA-Enlil) ja viimeaikaiset M- ja X-luokan purkaukset (NOAA).

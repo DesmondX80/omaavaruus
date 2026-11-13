@@ -13,7 +13,7 @@ import { initPush, renderPush } from './push.js';
 import { initSheets } from './sheets.js';
 import { initSky, sky } from './sky.js';
 import { redrawMap, solarwind } from './solarwind.js';
-import { auroraHistory, sunStatus, weather } from './weather.js';
+import { auroraHistory, renderCameras, sunStatus, weather } from './weather.js';
 
 initNight(); initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initIss(); initNav();
 setInterval(tickCountdowns,1000);
@@ -21,7 +21,7 @@ el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.val
 launches(); sunStatus();
 initPush();
 solarwind();
-await initPlaces(()=>{weather(); auroraHistory(); sky(); events(); iss(); redrawMap(); renderPush();});
+await initPlaces(()=>{weather(); auroraHistory(); renderCameras(); sky(); events(); iss(); redrawMap(); renderPush();});
 setInterval(weather,300000); setInterval(auroraHistory,3600000); setInterval(sunStatus,1800000); setInterval(solarwind,300000); setInterval(iss,60000); setInterval(sky,60000); setInterval(events,6*3600000);
 // Yhteyden palatessa tiedot haetaan heti eikä vasta seuraavalla ajastetulla kierroksella.
 window.addEventListener('online',()=>{weather(); sky(); events(); solarwind(); iss();});
