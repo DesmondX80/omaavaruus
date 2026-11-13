@@ -125,8 +125,18 @@
           <button type="button" id="iss-full" class="sky-btn" aria-label="Avaa kartta koko näytölle"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
           <button type="button" id="iss-close" class="sky-btn" aria-label="Sulje koko näytön tila">✕</button>
         </div>
-        <div class="iss-map-stage"><canvas id="iss-map" class="iss-map" role="img" aria-label="Ylilennon reitti kartalla"></canvas></div>
-        <div id="iss-map-meta" class="muted">Paksu viiva: asema näkyy · ohut viiva: taivaalla mutta ei näy · katkoviiva: rata ennen ja jälkeen · ympyrän sisällä asema on yli 5° korkeudella</div>
+        <div class="iss-map-stage">
+          <canvas id="iss-map" class="iss-map" role="img" aria-label="Avaruusaseman sijainti ja reitti kartalla"></canvas>
+          <div class="iss-map-modes" role="group" aria-label="Kartan näkymä">
+            <button type="button" class="sky-btn" data-map-mode="station" aria-pressed="true">Asema nyt</button>
+            <button type="button" class="sky-btn" data-map-mode="pass" aria-pressed="false">Ylilento</button>
+          </div>
+          <div class="iss-map-zoom">
+            <button type="button" id="iss-zoom-in" class="sky-btn" aria-label="Lähennä">+</button>
+            <button type="button" id="iss-zoom-out" class="sky-btn" aria-label="Loitonna">−</button>
+          </div>
+        </div>
+        <div id="iss-map-meta" class="muted"></div>
       </div>
       <ol id="iss-passes" class="event-list"></ol>
       <div id="iss-notify" class="favorite-options"></div>

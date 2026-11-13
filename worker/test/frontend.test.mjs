@@ -70,7 +70,7 @@ describe("taivaan perspektiivinäkymä", async () => {
 });
 
 describe("ISS-ylilennon kartta", async () => {
-  const { horizonKm, project, trackSpan } = await import("../../frontend/js/issmap.js");
+  const { horizonKm, project, trackLatLon, trackSpan } = await import("../../frontend/js/issmap.js");
 
   it("projisoi paikat kilometreiksi havaitsijasta", () => {
     const [east, north] = project(60, 25, 61, 25);
@@ -88,5 +88,16 @@ describe("ISS-ylilennon kartta", async () => {
     expect(horizonKm(420, 90)).toBeCloseTo(0, 5);
     const start = "2026-11-16T16:50:00.000Z";
     expect(trackSpan({ start, step_s: 20, points: [[0, 0], [1, 1], [2, 2]] })).toEqual([Date.parse(start), Date.parse(start) + 40_000]);
+  });
+
+  it("laskee aseman paikan radan näytteiden väliltä", () => {
+    const start = "2026-11-16T16:50:00.000Z", t0 = Date.parse(start);
+    // Pituusaste vaihtuu päivämäärärajalla 180°:sta −180°:een; väliarvo ei saa kiertää maapallon ympäri.
+    const track = { start, step_s: 60, points: [[10, 178], [12, -178], [14, -174]] };
+    expect(trackLatLon(track, t0 + 30_000)).toEqual({ lat: 11, lon: 180 });
+    expect(trackLatLon(track, t0 + 45_000)).toEqual({ lat: 11.5, lon: -179 });
+    expect(trackLatLon(track, t0 + 120_000)).toEqual({ lat: 14, lon: -174 });
+    expect(trackLatLon(track, t0 - 1)).toBeNull();
+    expect(trackLatLon(track, t0 + 120_001)).toBeNull();
   });
 });

@@ -373,6 +373,12 @@ describe("reitit", () => {
     const body = await (await get("/api/iss?lat=60.17&lon=24.94")).json<any>();
     expect(body.position.alt).toBeGreaterThan(5);
     expect(body.passes[0].visible_start).toBeTruthy();
+    // Rata nykyhetken kartalle: kymmenen minuuttia taaksepäin ja seuraava kierros minuutin välein.
+    expect(body.orbit).toMatchObject({ start: "2026-11-16T16:42:00.000Z", step_s: 60 });
+    expect(body.orbit.points.length).toBeGreaterThan(100);
+    const [lat, lon] = body.orbit.points[10];
+    expect(lat).toBeCloseTo(body.position.lat, 1);
+    expect(lon).toBeCloseTo(body.position.lon, 1);
     const chart = await (await get("/api/sky?lat=60.17&lon=24.94")).json<any>();
     expect(chart.objects[0]).toMatchObject({ name: "ISS", kind: "iss" });
     const detail = await (await get("/api/sky/object?lat=60.17&lon=24.94&name=ISS")).json<any>();

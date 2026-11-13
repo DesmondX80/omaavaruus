@@ -172,7 +172,13 @@ body.sky-locked { overflow: hidden; }
 .iss-map-bar :disabled { opacity: .4; cursor: default; }
 #iss-map-title { flex: 1; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .iss-map-stage { position: relative; width: 100%; max-width: 360px; aspect-ratio: 1; margin: 0 auto 6px; }
-.iss-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+.iss-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; touch-action: pan-y; }
+.iss-map-modes, .iss-map-zoom { position: absolute; display: flex; gap: 4px; }
+.iss-map-modes { top: 8px; left: 8px; }
+.iss-map-zoom { right: 8px; bottom: 8px; flex-direction: column; }
+.iss-map-zoom .sky-btn { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; }
+.iss-map-stage .sky-btn { background: rgba(5,7,15,.8); }
+.iss-map-stage .sky-btn:disabled { opacity: .4; cursor: default; }
 #iss-close { display: none; }
 /* Koko näytön tila kuten taivaankartalla: kortista jää näkyviin vain kartta. */
 #iss.iss-full { position: fixed; inset: 0; z-index: 50; margin: 0; border-radius: 0; border: 0; display: flex; flex-direction: column;
@@ -180,6 +186,7 @@ body.sky-locked { overflow: hidden; }
 #iss.iss-full > :not(.iss-map-box) { display: none; }
 #iss.iss-full .iss-map-box { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; }
 #iss.iss-full .iss-map-stage { flex: 1; min-height: 0; max-width: none; aspect-ratio: auto; }
+#iss.iss-full .iss-map { touch-action: none; }
 #iss.iss-full #iss-full { display: none; }
 #iss.iss-full #iss-close { display: inline-flex; }
 .launch-list { list-style: none; margin: 0; padding: 0; }

@@ -41,6 +41,10 @@ const STEP_MS = MIN;
 /** Kartan reitti: näytteiden väli ja kuinka paljon reittiä piirretään ylilennon kummallekin puolelle. */
 const TRACK_STEP_S = 20;
 const TRACK_MARGIN_MS = 3 * MIN;
+/** Nykyhetken kartan rata. Asema liikkuu minuutissa noin 440 km, joten minuutin näytteiden väli riittää tasaiseen viivaan. */
+const ORBIT_STEP_S = 60;
+const ORBIT_PAST_MS = 10 * MIN;
+const ORBIT_AHEAD_MS = 95 * MIN;
 
 export interface Tle {
   name: string;
@@ -172,17 +176,22 @@ export interface Track {
   points: [number, number][];
 }
 
-/** Aseman alapuolinen piste tasavälein ylilennon ajalta ja vähän sen kummaltakin puolelta. */
-function groundTrack(tracker: Tracker, from: number, to: number): Track {
-  const step = TRACK_STEP_S * 1000;
-  const start = Math.floor((from - TRACK_MARGIN_MS) / 1000) * 1000;
+/** Aseman alapuolinen piste tasavälein aikaväliltä [from, to]. */
+function groundTrack(tracker: Tracker, from: number, to: number, stepS: number): Track {
+  const step = stepS * 1000;
+  const start = Math.floor(from / 1000) * 1000;
   const points: [number, number][] = [];
-  for (let t = start; t < to + TRACK_MARGIN_MS + step; t += step) {
+  for (let t = start; t < to + step; t += step) {
     const state = tracker.state(t);
     if (!state) break;
     points.push([round(state.lat, 2), round(state.lon, 2)]);
   }
-  return { start: new Date(start).toISOString(), step_s: TRACK_STEP_S, points };
+  return { start: new Date(start).toISOString(), step_s: stepS, points };
+}
+
+/** Aseman rata kartalle: vähän mennyttä ja seuraava kierros (noin 93 min) nykyhetkestä. */
+export function issOrbit(tle: Tle, now: Date): Track {
+  return groundTrack(new Tracker(tle, 0, 0), now.getTime() - ORBIT_PAST_MS, now.getTime() + ORBIT_AHEAD_MS, ORBIT_STEP_S);
 }
 
 /** Ylilennot, joilla asema nousee vähintään MIN_ELEVATION korkeudelle; näkyvät on merkitty. */
@@ -227,7 +236,7 @@ export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days 
         visible_start: visibleStart === null ? null : iso(visibleStart),
         visible_end: visibleEnd === null ? null : iso(visibleEnd),
         magnitude: brightest,
-        track: visibleStart === null ? null : groundTrack(tracker, startTime, endTime),
+        track: visibleStart === null ? null : groundTrack(tracker, startTime - TRACK_MARGIN_MS, endTime + TRACK_MARGIN_MS, TRACK_STEP_S),
       });
       t = Math.ceil(s / STEP_MS) * STEP_MS;
       prev = tracker.state(t);
@@ -302,6 +311,7 @@ export async function getIss(lat: number, lon: number, now = new Date()) {
   return {
     tle_epoch: tle.epoch,
     position: issPosition(tle, lat, lon, now),
+    orbit: issOrbit(tle, now),
     passes: passes.filter((p) => Date.parse(p.end) > now.getTime()),
   };
 }
