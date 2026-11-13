@@ -104,3 +104,37 @@ describe("ISS-ylilennon kartta", async () => {
     expect(trackLatLon(track, t0 + 120_001)).toBeNull();
   });
 });
+
+describe("Nyt-näkymän yhteenveto", async () => {
+  const { outlook, overcastNight } = await import("../../frontend/js/outlook.js");
+  const now = Date.parse("2026-11-16T15:00:00Z");
+  const hhmm = (t) => new Date(t).toISOString().slice(11, 16);
+  const pass = { visible_start: "2026-11-16T16:51:00Z", visible_end: "2026-11-16T16:53:00Z", max_alt: 8, max_az: 180, cloud_cover: null };
+  const weather = (chance, hourly = []) => ({ best_window: chance && { start: "2026-11-16T20:00:00Z", end: "2026-11-16T23:00:00Z", chance }, hourly });
+  const event = { title: "Leonidit", visible: true, best_time: "2026-11-17T04:00:00Z", cloud_cover: 20 };
+  const text = (o) => o.title.map((p) => p.text).join("");
+
+  it("valitsee pääsyyn tärkeyden ja ajan mukaan", () => {
+    const good = outlook({ weather: weather("Hyvä"), iss: { passes: [pass] }, events: { events: [event] } }, now, hhmm);
+    expect(text(good)).toBe("Revontulet: hyvä mahdollisuus klo 20:00–23:00");
+    expect(good).toMatchObject({ tone: "good", view: "revontulet", also: ["ISS näkyy klo 16:51 matalalla etelässä", "Leonidit klo 04:00"] });
+    // Pelkkä mahdollisuus revontuliin jää näkyvän ylilennon ja tapahtuman taakse.
+    const weak = outlook({ weather: weather("Mahdollinen"), iss: { passes: [pass] }, events: { events: [event] } }, now, hhmm);
+    expect(text(weak)).toBe("ISS näkyy klo 16:51 matalalla etelässä");
+    expect(weak.view).toBe("iss");
+    expect(weak.also.at(-1)).toBe("revontulet mahdollisia klo 20:00–23:00");
+  });
+
+  it("ohittaa pilvien peittämät ja yli vuorokauden päässä olevat kohteet", () => {
+    const o = outlook({ weather: weather(null), iss: { passes: [{ ...pass, cloud_cover: 95 }] }, events: { events: [{ ...event, best_time: "2026-11-18T04:00:00Z" }] } }, now, hhmm);
+    expect(o).toMatchObject({ tone: "off", also: [] });
+    expect(text(o)).toBe("Ei revontulia eikä näkyviä ylilentoja seuraavan vuorokauden aikana");
+  });
+
+  it("kertoo pilvisestä yöstä", () => {
+    const hours = (cloud) => Array.from({ length: 8 }, (_, i) => ({ light: i < 2 ? "Valoisaa" : "Pimeää", cloud_cover: cloud }));
+    expect(overcastNight(weather(null, hours(95)))).toBe(true);
+    expect(overcastNight(weather(null, hours(50)))).toBe(false);
+    expect(text(outlook({ weather: weather(null, hours(100)) }, now, hhmm))).toBe("Pilvistä koko yön");
+  });
+});

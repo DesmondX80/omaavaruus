@@ -25,6 +25,7 @@ const SHELL = [
   "js/launches.js",
   "js/nav.js",
   "js/now.js",
+  "js/outlook.js",
   "js/places.js",
   "js/push.js",
   "js/sheets.js",

@@ -1,24 +1,36 @@
-// Nyt-kooste: illan revontuliarvio, seuraavat tapahtumat ja taivaan tilanne muiden näkymien hakemista tiedoista.
+// Nyt-kooste: lähituntien yhteenveto, revontulten tuntipalkki, seuraavat tapahtumat ja taivaan tilanne muiden näkymien hakemista tiedoista.
 import { el, store, row, hhmm, num, dayLabel, cloudNote } from './core.js';
 import { countdownEl, eventIcon } from './calendar.js';
 import { dir, issNowText } from './iss.js';
 import { placeLabel } from './places.js';
 import { select as selectSky } from './sky.js';
-import { chanceTone, hourClass } from './weather.js';
+import { hourClass } from './weather.js';
+import { outlook } from './outlook.js';
 
-const PHRASES = {'Mahdollinen':'mahdollisia', 'Hyvä':'hyvä mahdollisuus', 'Erittäin hyvä':'erittäin hyvä mahdollisuus'};
 const DAY = 86400000;
+
+const LINKS = {revontulet:'Näytä ennuste ja perustelut ›', iss:'Näytä ylilento kartalla ›', kalenteri:'Näytä kalenterissa ›'};
+
+// Yhteenveto päivittyy, kun mikä tahansa sen lähteistä (revontulet, ISS, tapahtumat) on haettu.
+function renderOutlook() {
+  const w=store.weather; if(!w) return;
+  const o=outlook({weather:w, iss:store.iss, events:store.events}, Date.now(), hhmm);
+  el('now-verdict').className=`verdict ${o.tone}`;
+  el('now-eyebrow').textContent=`Seuraavat 24 h · ${placeLabel()}`;
+  el('now-title').replaceChildren(...o.title.map(part=>{
+    if(!part.strong) return part.text;
+    const b=document.createElement('b'); b.textContent=part.text; return b;
+  }));
+  el('now-sub').textContent=[
+    o.also.length ? `Myös: ${o.also.join(' · ')}.` : '',
+    `Revontulet juuri nyt: ${w.aurora_chance.toLowerCase()}${w.aurora_limits.length ? ` (rajoittaa: ${w.aurora_limits.join(', ')})` : ''}. Tiedot haettu klo ${hhmm(w.fetched)}.`,
+  ].filter(Boolean).join(' ');
+  el('now-link').href=`#${o.view}`; el('now-link').textContent=LINKS[o.view];
+}
 
 function renderAurora() {
   const w=store.weather; if(!w) return;
-  const best=w.best_window;
-  el('now-verdict').className=`verdict ${chanceTone(best?.chance)}`;
-  el('now-eyebrow').textContent=`Seuraavat 24 h · ${placeLabel()}`;
-  if(best) {
-    const b=document.createElement('b'); b.textContent=PHRASES[best.chance] ?? best.chance.toLowerCase();
-    el('now-title').replaceChildren('Revontulet: ',b,` klo ${hhmm(best.start)}–${hhmm(best.end)}`);
-  } else el('now-title').textContent='Revontulia ei ole odotettavissa';
-  el('now-sub').textContent=`Juuri nyt: ${w.aurora_chance.toLowerCase()}${w.aurora_limits.length ? ` (rajoittaa: ${w.aurora_limits.join(', ')})` : ''}. Tiedot haettu klo ${hhmm(w.fetched)}.`;
+  renderOutlook();
   el('now-hours').replaceChildren(...w.hourly.map(h=>{
     const cell=document.createElement('span'), bar=document.createElement('i'), label=document.createElement('small'), hour=new Date(h.time_tag).getHours();
     cell.className=hourClass(h); label.textContent=hour%3===0 ? String(hour).padStart(2,'0') : ''; cell.append(bar,label); return cell;
@@ -68,7 +80,7 @@ export function initNow() {
   document.addEventListener('data',e=>{
     if(e.detail==='weather') renderAurora();
     else if(e.detail==='sky') renderSky();
-    else renderNext();
+    else {renderNext(); renderOutlook();}
     if(e.detail==='iss') el('now-iss').textContent=issNowText();
   });
 }
