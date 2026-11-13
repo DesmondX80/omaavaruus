@@ -275,9 +275,19 @@ describe("reitit", () => {
     expect(find(oulu, "Kuun puolivarjopimennys")).toMatchObject({ type: "lunar_eclipse", visible: true, visibility: "Näkyy kokonaan" });
     expect(find(oulu, "Osittainen auringonpimennys").time.slice(0, 10)).toBe("2027-08-02");
 
-    const r = await get("/api/events?lat=65&lon=25.5");
-    expect(r.status).toBe(200);
-    expect((await r.json<any>()).events.length).toBeGreaterThan(10);
+    // Reitit jakavat kalenterin kolmeen osaan CPU-ajan vuoksi; yhdessä ne antavat saman kuin getEvents.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(from);
+    const parts = await Promise.all(["/api/events", "/api/events/conjunctions", "/api/events/solar"].map(async (path) => {
+      const r = await get(`${path}?lat=65&lon=25.5`);
+      expect(r.status).toBe(200);
+      return (await r.json<any>()).events as any[];
+    }));
+    expect(parts[0].every((e) => e.type === "meteor_shower" || e.type === "lunar_eclipse")).toBe(true);
+    expect(parts[1].every((e) => e.type === "conjunction")).toBe(true);
+    expect(parts[2].map((e) => e.type)).toEqual(["solar_eclipse"]);
+    const merged = parts.flat().map((e) => e.title + e.time).sort();
+    expect(merged).toEqual(oulu.map((e) => e.title + e.time).sort());
   });
 
   it("laskee aurinkotuulen kymmenen minuutin keskiarvot aktiivisesta satelliitista", () => {

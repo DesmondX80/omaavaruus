@@ -6,14 +6,17 @@ import {
   Elongation,
   Equator,
   GeoVector,
+  HelioVector,
   Horizon,
   Illumination,
   MakeTime,
-  NextLocalSolarEclipse,
+  NextGlobalSolarEclipse,
   NextLunarEclipse,
   Observer,
+  SearchGlobalSolarEclipse,
   SearchLocalSolarEclipse,
   SearchLunarEclipse,
+  Vector,
   type AstroTime,
 } from "astronomy-engine";
 
@@ -90,21 +93,40 @@ function bodyAltitude(body: Body, time: AstroTime, observer: Observer): number {
 }
 
 /**
+ * Kohteen korkeusfunktio vuorokauden ajalle `center`-hetken ympärillä. Taivaan paikka (RA, Dec) lasketaan vain
+ * jakson alussa ja lopussa ja interpoloidaan niiden välillä: Aurinko ja planeetat siirtyvät vuorokaudessa enintään
+ * pari astetta tasaisesti, joten tulos vastaa tarkkaa laskentaa murto-osalla CPU-ajasta.
+ */
+function fixedAltitude(body: Body, center: number, observer: Observer): (time: AstroTime) => number {
+  const start = center - 12 * HOUR_MS, span = 24 * HOUR_MS;
+  const [a, b] = [start, start + span].map((t) => Equator(body, MakeTime(new Date(t)), observer, true, true));
+  // Rektaskensio tunteina 0–24: väli otetaan lyhyintä tietä nollakohdan yli.
+  const dra = ((b.ra - a.ra + 36) % 24) - 12;
+  return (time) => {
+    const f = (time.date.getTime() - start) / span;
+    return Horizon(time, observer, (a.ra + dra * f + 24) % 24, a.dec + (b.dec - a.dec) * f).altitude;
+  };
+}
+
+/**
  * Paras havaintohetki vuorokauden ajalta `center`-hetken ympäriltä: tunti, jolloin kohde on korkeimmillaan
  * Auringon ollessa `maxSunAlt`-rajan alapuolella. Palauttaa null, jos taivas ei pimene tarpeeksi.
+ * Auringon taivaan paikka lasketaan kerran: se siirtyy vuorokaudessa alle asteen, ja täysi laskenta joka tunnille
+ * veisi suurimman osan tapahtumakalenterin CPU-ajasta.
  */
 function bestDarkHour(center: number, observer: Observer, maxSunAlt: number, altitude: (time: AstroTime) => number) {
   let best: { time: AstroTime; alt: number } | null = null;
+  const sunAlt = fixedAltitude(Body.Sun, center, observer);
   for (let h = -12; h <= 12; h++) {
     const time = MakeTime(new Date(center + h * HOUR_MS));
-    if (bodyAltitude(Body.Sun, time, observer) > maxSunAlt) continue;
+    if (sunAlt(time) > maxSunAlt) continue;
     const alt = altitude(time);
     if (!best || alt > best.alt) best = { time, alt };
   }
   return best;
 }
 
-function meteorShowers(from: Date, to: Date, observer: Observer): SkyEvent[] {
+export function meteorShowers(from: Date, to: Date, observer: Observer): SkyEvent[] {
   const events: SkyEvent[] = [];
   for (const year of [from.getUTCFullYear(), from.getUTCFullYear() + 1]) {
     for (const shower of SHOWERS) {
@@ -140,9 +162,31 @@ function meteorShowers(from: Date, to: Date, observer: Observer): SkyEvent[] {
   return events;
 }
 
-function lunarEclipses(from: Date, to: Date, observer: Observer): SkyEvent[] {
-  const events: SkyEvent[] = [];
+/** Kuunpimennys paikasta riippumattomana tietona: syvin vaihe, laji, peitto ja vaiheiden puolikestot minuutteina. */
+export interface LunarEclipseRow {
+  peak: string;
+  kind: string;
+  obscuration: number;
+  sd_partial: number;
+  sd_penum: number;
+}
+
+/**
+ * Kuunpimennykset aikavälillä. Ne ovat samat kaikkialla, joten lista lasketaan kerran vuorokaudessa kaikille paikoille
+ * (haku vie noin 6 ms, ks. index.ts); paikkakohtainen näkyvyys lasketaan siitä kevyesti.
+ */
+export function lunarEclipseList(from: Date, to: Date): LunarEclipseRow[] {
+  const rows: LunarEclipseRow[] = [];
   for (let e = SearchLunarEclipse(from); e.peak.date <= to; e = NextLunarEclipse(e.peak)) {
+    rows.push({ peak: e.peak.date.toISOString(), kind: e.kind, obscuration: e.obscuration, sd_partial: e.sd_partial, sd_penum: e.sd_penum });
+  }
+  return rows;
+}
+
+export function lunarEclipses(rows: LunarEclipseRow[], observer: Observer): SkyEvent[] {
+  const events: SkyEvent[] = [];
+  for (const row of rows) {
+    const e = { ...row, peak: MakeTime(new Date(row.peak)) };
     // Varjovaiheen alku, syvin kohta ja loppu: kuinka monessa Kuu on horisontin yläpuolella.
     const halfMinutes = e.sd_partial || e.sd_penum;
     const up = [-halfMinutes, 0, halfMinutes].filter(
@@ -164,10 +208,42 @@ function lunarEclipses(from: Date, to: Date, observer: Observer): SkyEvent[] {
   return events;
 }
 
+/** Auringonpimennysten syvimmät vaiheet maapallolla aikavälillä. Samat kaikkialla, joten lista jaetaan paikkojen kesken. */
+export function solarEclipseList(from: Date, to: Date): string[] {
+  const peaks: string[] = [];
+  for (let e = SearchGlobalSolarEclipse(from); e.peak.date <= to; e = NextGlobalSolarEclipse(e.peak)) peaks.push(e.peak.date.toISOString());
+  return peaks;
+}
+
+/** Auringon ja Kuun säteiden summa asteina pienellä varalla: tätä lähempänä toisiaan Kuu peittää osan Auringosta. */
+const ECLIPSE_CONTACT_DEG = 0.6;
+
+/**
+ * Käyvätkö Aurinko ja Kuu paikalta katsottuna päällekkäin maailmanlaajuisen pimennyksen aikana Auringon ollessa
+ * horisontin tuntumassa tai sen yläpuolella. Tarkistus tehdään
+ * 15 minuutin välein neljän tunnin ajalta syvimmän vaiheen molemmin puolin: se on paljon kevyempi kuin paikallinen haku,
+ * joka jatkaisi seuraavaan paikalta näkyvään pimennykseen, vaikka se olisi vuosien päässä.
+ */
+function eclipseReachesObserver(peak: number, observer: Observer): boolean {
+  for (let m = -240; m <= 240; m += 15) {
+    const time = MakeTime(new Date(peak + m * 60_000));
+    const sun = Equator(Body.Sun, time, observer, true, true);
+    // Horisontin alla tapahtuva pimennys ei näy, eikä paikallinen haku löydä sitä (se jatkaisi seuraavaan).
+    if (Horizon(time, observer, sun.ra, sun.dec).altitude < -1) continue;
+    const moon = Equator(Body.Moon, time, observer, true, true);
+    if (AngleBetween(sun.vec, moon.vec) < ECLIPSE_CONTACT_DEG) return true;
+  }
+  return false;
+}
+
 /** Vain paikalta näkyvät auringonpimennykset: muualla näkyvistä ei ole havaitsijalle iloa. */
-function solarEclipses(from: Date, to: Date, observer: Observer): SkyEvent[] {
+export function solarEclipses(from: Date, to: Date, observer: Observer, globalPeaks = solarEclipseList(from, to)): SkyEvent[] {
   const events: SkyEvent[] = [];
-  for (let e = SearchLocalSolarEclipse(from, observer); e.peak.time.date <= to; e = NextLocalSolarEclipse(e.peak.time, observer)) {
+  for (const peak of globalPeaks.map(Date.parse).filter((t) => t >= from.getTime() && t <= to.getTime())) {
+    if (!eclipseReachesObserver(peak, observer)) continue;
+    // Paikallinen haku alkaa päivää ennen, joten se löytää juuri tämän pimennyksen yhdellä kierroksella.
+    const e = SearchLocalSolarEclipse(new Date(peak - DAY_MS), observer);
+    if (Math.abs(e.peak.time.date.getTime() - peak) > DAY_MS) continue;
     if (Math.max(e.partial_begin.altitude, e.peak.altitude, e.partial_end.altitude) <= 0) continue;
     events.push({
       type: "solar_eclipse",
@@ -185,13 +261,19 @@ function solarEclipses(from: Date, to: Date, observer: Observer): SkyEvent[] {
   return events;
 }
 
-function conjunctions(from: Date, to: Date, observer: Observer): SkyEvent[] {
+export function conjunctions(from: Date, to: Date, observer: Observer): SkyEvent[] {
   const events: SkyEvent[] = [];
   const steps = Math.floor((to.getTime() - from.getTime()) / SCAN_STEP_MS);
   const vector = (body: Body, ms: number, aberration: boolean) => GeoVector(body, MakeTime(new Date(ms)), aberration);
   const separation = (a: Body, b: Body, ms: number) => AngleBetween(vector(a, ms, true), vector(b, ms, true));
   // Karkea haku: planeettojen suunnat lasketaan kerran askelta kohden. Aberraatio ei vaikuta minimin löytymiseen.
-  const coarse = PLANETS.map(([, body]) => Array.from({ length: steps + 1 }, (_, n) => vector(body, from.getTime() + n * SCAN_STEP_MS, false)));
+  // Maan paikka lasketaan kerran askelta kohden ja planeettojen suunnat Maasta sen avulla (valon kulkuaika jätetään pois).
+  const times = Array.from({ length: steps + 1 }, (_, n) => MakeTime(new Date(from.getTime() + n * SCAN_STEP_MS)));
+  const earth = times.map((t) => HelioVector(Body.Earth, t));
+  const coarse = PLANETS.map(([, body]) => times.map((t, n) => {
+    const p = HelioVector(body, t), e = earth[n];
+    return new Vector(p.x - e.x, p.y - e.y, p.z - e.z, t);
+  }));
 
   for (let i = 0; i < PLANETS.length; i++) {
     for (let j = i + 1; j < PLANETS.length; j++) {
@@ -214,7 +296,7 @@ function conjunctions(from: Date, to: Date, observer: Observer): SkyEvent[] {
         if (degrees > CONJUNCTION_MAX_DEG) continue;
 
         const sun = Elongation(a, new Date(closest));
-        const best = bestDarkHour(closest, observer, TWILIGHT_SUN_ALT, (time) => bodyAltitude(a, time, observer));
+        const best = bestDarkHour(closest, observer, TWILIGHT_SUN_ALT, fixedAltitude(a, closest, observer));
         const visible = sun.elongation >= MIN_ELONGATION_DEG && !!best && best.alt > 3;
         events.push({
           type: "conjunction",
@@ -235,15 +317,29 @@ function conjunctions(from: Date, to: Date, observer: Observer): SkyEvent[] {
   return events;
 }
 
-/** Seuraavan vuoden taivaan tapahtumat aikajärjestyksessä ja niiden näkyvyys paikalta. */
-export function getEvents(lat: number, lon: number, from: Date) {
+/**
+ * Kalenteri on jaettu kolmeen osaan, jotka haetaan eri pyynnöillä: kukin mahtuu Workersin ilmaistason 10 ms:n
+ * CPU-budjettiin (meteoriparvet ja kuunpimennykset noin 2 ms, konjunktiot noin 5 ms, auringonpimennykset noin 7 ms).
+ */
+export const EVENT_GROUPS = ["main", "conjunctions", "solar"] as const;
+export type EventGroup = (typeof EVENT_GROUPS)[number];
+
+export const eventRange = (from: Date) => ({ from, to: new Date(from.getTime() + HORIZON_DAYS * DAY_MS) });
+
+/** Yhden osan tapahtumat aikajärjestyksessä ja niiden näkyvyys paikalta. Kuunpimennysten lista voidaan antaa valmiina. */
+export function getEventGroup(group: EventGroup, lat: number, lon: number, from: Date, lunar?: LunarEclipseRow[], solarPeaks?: string[]) {
   const observer = new Observer(lat, lon, 0);
-  const to = new Date(from.getTime() + HORIZON_DAYS * DAY_MS);
-  const events = [
-    ...meteorShowers(from, to, observer),
-    ...lunarEclipses(from, to, observer),
-    ...solarEclipses(from, to, observer),
-    ...conjunctions(from, to, observer),
-  ].sort((x, y) => x.time.localeCompare(y.time));
+  const { to } = eventRange(from);
+  const events =
+    group === "conjunctions" ? conjunctions(from, to, observer)
+    : group === "solar" ? solarEclipses(from, to, observer, solarPeaks ?? solarEclipseList(from, to))
+    : [...meteorShowers(from, to, observer), ...lunarEclipses(lunar ?? lunarEclipseList(from, to), observer)];
+  events.sort((x, y) => x.time.localeCompare(y.time));
   return { from: from.toISOString(), to: to.toISOString(), events };
+}
+
+/** Kaikki seuraavan vuoden tapahtumat yhdellä kertaa (testit ja kehitys; reitit hakevat osat erikseen). */
+export function getEvents(lat: number, lon: number, from: Date) {
+  const parts = EVENT_GROUPS.map((group) => getEventGroup(group, lat, lon, from));
+  return { ...parts[0], events: parts.flatMap((p) => p.events).sort((x, y) => x.time.localeCompare(y.time)) };
 }

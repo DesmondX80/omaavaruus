@@ -111,7 +111,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `POST /api/push/unsubscribe` | Poistaa tilauksen (`endpoint`) |
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
 | `GET /api/iss?lat&lon&sat` | Avaruusaseman (`sat=iss` oletuksena, `sat=css` Tiangong) sijainti ja ylilennot viideksi vuorokaudeksi, näkyvät merkittyinä, reitteineen (`track`) ja ratoineen taivaalla (`sky_track`), sekä aseman rata seuraavan kierroksen ajalta (`orbit`); näkyvillä ylilennoilla pilvisyysennuste (`cloud_cover`, kolme vuorokautta eteenpäin) |
-| `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta ja pilvisyysennuste parhaalle hetkelle (`cloud_cover`, kolme vuorokautta eteenpäin) |
+| `GET /api/events?lat&lon`, `/api/events/conjunctions`, `/api/events/solar` | Kalenteri kolmessa osassa (meteoriparvet ja kuunpimennykset, planeettojen konjunktiot, auringonpimennykset), jotta kukin pyyntö mahtuu ilmaistason CPU-budjettiin: seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta ja pilvisyysennuste parhaalle hetkelle (`cloud_cover`, kolme vuorokautta eteenpäin) |
 | `GET /api/sun` | Maahan osuvat CME:t (`cmes`: saapuminen, sivuosuma, Kp-arvio, lähtö ja nopeus) ja M- ja X-luokan purkaukset kolmelta vuorokaudelta (`flares`) |
 | `GET /api/aurora/history?lat&lon` | Revontulihistoria seitsemältä viime yöltä: yön suurin havaittu Kp, pimeän ajan pilvisyys ja jälkikäteen laskettu paras arvio |
 | `GET /api/moon?lat&lon` | Kuun neljännekset neljäksi kuukaudeksi ja kuuttomat yöt (Kuu horisontin alla koko pimeän ajan) kahdeksi viikoksi |

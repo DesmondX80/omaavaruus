@@ -1,5 +1,5 @@
 import { cloudAt, cloudCoverOrNull } from "./clouds";
-import { getEvents } from "./events";
+import { eventRange, getEventGroup, lunarEclipseList, solarEclipseList, type EventGroup } from "./events";
 import { searchPlaces } from "./geocode";
 import { cached, HttpError, sharedCacheWorks } from "./http";
 import { getAuroraHistory } from "./history";
@@ -111,11 +111,23 @@ async function route(url: URL, env: Env): Promise<unknown> {
         throw new HttpError(503, `${SATELLITES[sat].name}: laskenta epäonnistui: ${exc instanceof HttpError ? `CelesTrak ${exc.detail}` : exc}`);
       });
     }
-    case "/api/events": {
+    case "/api/events":
+    case "/api/events/conjunctions":
+    case "/api/events/solar": {
+      const group: EventGroup = url.pathname.endsWith("/conjunctions") ? "conjunctions" : url.pathname.endsWith("/solar") ? "solar" : "main";
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
       const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
       const [calendar, clouds] = await Promise.all([
-        cached(`events:${la}:${lo}`, EVENTS_TTL_S, async () => getEvents(la, lo, new Date()), true),
+        cached(`events-${group}:${la}:${lo}`, EVENTS_TTL_S, async () => {
+          const from = new Date();
+          // Pimennysten maailmanlaajuiset listat ovat samat kaikkialla: ne lasketaan kerran vuorokaudessa ja jaetaan paikkojen kesken.
+          const day = from.toISOString().slice(0, 10), dayStart = new Date(`${day}T00:00:00Z`), to = eventRange(from).to;
+          const lunar = group === "main"
+            ? await cached(`lunar-eclipses:${day}`, 24 * 3600, async () => lunarEclipseList(dayStart, to), true)
+            : undefined;
+          const solar = group === "solar" ? await cached(`solar-eclipses:${day}`, 24 * 3600, async () => solarEclipseList(dayStart, to), true) : undefined;
+          return getEventGroup(group, la, lo, from, lunar?.filter((e) => Date.parse(e.peak) >= from.getTime() - 6 * 3_600_000), solar);
+        }, true),
         cloudCoverOrNull(lat(), lon()),
       ]);
       // Pilvisyys lisätään välimuistista haettuun kalenteriin, koska ennuste vanhenee paljon kalenteria nopeammin.
