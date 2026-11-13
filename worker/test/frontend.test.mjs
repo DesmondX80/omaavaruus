@@ -183,3 +183,32 @@ describe("revontulikamerat", async () => {
     expect(nearestCameras({ lat: 68.9, lon: 20.9 }, 1)[0].name).toBe("Kilpisjärvi");
   });
 });
+
+describe("aurinkokunnan kartta", async () => {
+  const { helio, eccentricAnomaly, PLANETS } = await import("../../frontend/js/planets.js");
+  const Astronomy = await import("astronomy-engine");
+  const BODIES = { Merkurius: "Mercury", Venus: "Venus", Maa: "EMB", Mars: "Mars", Jupiter: "Jupiter", Saturnus: "Saturn", Uranus: "Uranus", Neptunus: "Neptune" };
+
+  it("ratkaisee Keplerin yhtälön", () => {
+    for (const e of [0, 0.2, 0.9]) {
+      for (const M of [0.1, 1, 3, 5]) {
+        const E = eccentricAnomaly(M, e);
+        expect(Math.atan2(Math.sin(E - e * Math.sin(E) - M), Math.cos(E - e * Math.sin(E) - M))).toBeCloseTo(0, 10);
+      }
+    }
+  });
+
+  it("planeettojen sijainnit vastaavat astronomy-enginen laskemia", () => {
+    const toEcliptic = Astronomy.Rotation_EQJ_ECL();
+    for (const iso of ["1990-03-01T00:00:00Z", "2026-11-13T12:00:00Z", "2040-07-15T00:00:00Z"]) {
+      const time = Date.parse(iso);
+      for (const { name } of PLANETS) {
+        const v = Astronomy.RotateVector(toEcliptic, Astronomy.HelioVector(Astronomy.Body[BODIES[name]], new Date(time)));
+        const [x, y, z] = helio(name, time), r = Math.hypot(v.x, v.y, v.z);
+        // Rata-alkioiden tarkkuus: Jupiterin ja Saturnuksen keskinäiset häiriöt jättävät muutaman kaariminuutin eron.
+        const arcmin = (Math.hypot(x - v.x, y - v.y, z - v.z) / r) * (180 / Math.PI) * 60;
+        expect(arcmin, `${name} ${iso}`).toBeLessThan(15);
+      }
+    }
+  });
+});

@@ -163,6 +163,32 @@
       <div id="sky-meta" class="muted"></div>
       <div id="object-list" class="objects"></div>
       </div>
+      <div class="panel" id="solar">
+        <div class="head"><h2 class="info-host" data-info-slot="solar">Aurinkokunta</h2>
+          <button type="button" id="solar-full" class="sky-btn" aria-label="Avaa aurinkokunnan kartta koko näytölle"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+          <button type="button" id="solar-close" class="sky-btn" aria-label="Sulje koko näytön tila">✕</button>
+        </div>
+        <div class="iss-map-stage">
+          <canvas id="solar-map" class="iss-map" role="img" aria-label="Planeetat kiertoradoillaan Auringon ympärillä"></canvas>
+          <div class="iss-map-modes" role="group" aria-label="Rajaus">
+            <button type="button" class="sky-btn" data-solar-preset="inner">Sisäplaneetat</button>
+            <button type="button" class="sky-btn" data-solar-preset="all">Kaikki</button>
+          </div>
+          <div class="iss-map-zoom">
+            <button type="button" id="solar-zoom-in" class="sky-btn" aria-label="Lähennä">+</button>
+            <button type="button" id="solar-zoom-out" class="sky-btn" aria-label="Loitonna">−</button>
+          </div>
+        </div>
+        <div class="solar-time">
+          <button type="button" id="solar-play" class="sky-btn" aria-label="Toista">▶</button>
+          <input type="range" id="solar-offset" min="-3650" max="3650" step="1" value="0" aria-label="Aikajana: vuorokautta nykyhetkestä" />
+          <select id="solar-speed" aria-label="Toistonopeus"></select>
+          <button type="button" id="solar-now" class="sky-btn">Nyt</button>
+        </div>
+        <div id="solar-time-label" class="muted" aria-live="off"></div>
+        <div id="solar-detail" class="sky-detail solar-detail" aria-live="polite"></div>
+        <div id="solar-meta" class="muted">Etäisyydet oikeassa mittakaavassa, planeetat vähintään pisteen kokoisina · ylhäältä katsottuna planeetat kiertävät vastapäivään · raahaa siirtääksesi, zoomaa nipistämällä tai painikkeilla</div>
+      </div>
     </section>
 
     <section class="view" id="view-iss" aria-label="ISS" hidden>

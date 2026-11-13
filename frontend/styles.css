@@ -179,7 +179,7 @@ h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .sky-video { position: absolute; inset: 0; object-fit: cover; }
 .sky-view { position: relative; touch-action: none; }
 /* Koko näytön tila: kortti peittää koko ikkunan. Toimii myös iPhonella, jossa Fullscreen API puuttuu. */
-#sky.sky-full, #iss.iss-full { position: fixed; inset: 0; z-index: 50; margin: 0; border-radius: 0; border: 0; display: flex; flex-direction: column; gap: 8px;
+#sky.sky-full, #iss.iss-full, #solar.solar-full { position: fixed; inset: 0; z-index: 50; margin: 0; border-radius: 0; border: 0; display: flex; flex-direction: column; gap: 8px;
   padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); overflow: hidden; }
 #sky.sky-full h2, #sky.sky-full #sky-full, #sky.sky-full #sky-meta, #sky.sky-full #object-list { display: none; }
 #sky.sky-full .sky-stage { flex: 1; min-height: 0; }
@@ -217,6 +217,17 @@ body.sky-locked { overflow: hidden; }
 #iss.iss-full .iss-map { touch-action: none; }
 #iss.iss-full #iss-full { display: none; }
 #iss.iss-full #iss-close { display: inline-flex; }
+/* Aurinkokunnan kartta käyttää ISS-kartan pohjaa (iss-map-stage, iss-map-modes, iss-map-zoom). */
+.solar-time { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.solar-time input { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.solar-time select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 13px; }
+#solar-play { min-width: 40px; }
+#solar-time-label { font-variant-numeric: tabular-nums; }
+#solar-close { display: none; }
+#solar.solar-full .iss-map-stage { flex: 1; min-height: 0; max-width: none; aspect-ratio: auto; width: 100%; }
+#solar.solar-full .iss-map { touch-action: none; }
+#solar.solar-full #solar-full, #solar.solar-full #solar-meta { display: none; }
+#solar.solar-full #solar-close { display: inline-flex; }
 
 /* Alhaalta nouseva paneeli: paikka, ilmoitukset ja selitykset. */
 .scrim { position: fixed; inset: 0; z-index: 60; display: grid; align-items: end; justify-items: center; background: rgba(2,4,10,.6); }
