@@ -2,6 +2,7 @@ import { cloudAt, cloudCoverOrNull } from "./clouds";
 import { getEvents } from "./events";
 import { searchPlaces } from "./geocode";
 import { cached, HttpError, sharedCacheWorks } from "./http";
+import { getAuroraHistory } from "./history";
 import { getLaunches } from "./launches";
 import { getMoon } from "./moon";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
@@ -116,6 +117,14 @@ async function route(url: URL, env: Env): Promise<unknown> {
         events: calendar.events.map((e) => ({ ...e, cloud_cover: e.best_time ? cloudAt(clouds, e.best_time) : null })),
         cloud_provider: clouds?.provider ?? null,
       };
+    }
+    case "/api/aurora/history": {
+      // Historia muuttuu vain kerran tunnissa (uusi Kp-arvo ja pilvihavainto), ja 0,1° pyöristys jakaa sen lähekkäisille paikoille.
+      const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
+      const hour = Math.floor(Date.now() / 3_600_000);
+      return cached(`aurora-history:${la}:${lo}:${hour}`, 3600, () => getAuroraHistory(la, lo), true).catch((exc) => {
+        throw new HttpError(503, `Revontulihistorian laskenta epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
+      });
     }
     case "/api/moon": {
       // Sama pyöristys ja välimuistiaika kuin tapahtumilla: kuuttomat yöt eivät muutu kymmenen kilometrin matkalla.

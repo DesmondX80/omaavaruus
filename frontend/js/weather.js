@@ -138,6 +138,26 @@ export async function weather() {
   } catch(e) {el('aurora').textContent=e.message;}
 }
 
+// Viime yöt: arvio jälkikäteen havaitusta Kp:stä, toteutuneesta pilvisyydestä ja valoisuudesta (palvelin laskee, ks. history.ts).
+export async function auroraHistory() {
+  try {
+    const h=await json(`/api/aurora/history?lat=${state.lat}&lon=${state.lon}`);
+    el('history').replaceChildren(...[...h.nights].reverse().map(n=>{
+      const row=document.createElement('div'), day=document.createElement('span'), detail=document.createElement('small');
+      row.className='night'; day.className='day';
+      day.textContent=new Date(`${n.night}T12:00:00`).toLocaleDateString('fi-FI',{weekday:'short',day:'numeric',month:'numeric'});
+      detail.textContent=n.dark_hours ? [
+        n.kp_max==null ? 'Kp ei tiedossa' : `Kp ${num(n.kp_max,1)}`,
+        n.cloud_mean==null ? null : `pilviä ${n.cloud_mean} %`,
+        n.best && n.best!=='Epätodennäköinen' ? `klo ${hhmm(n.best_time)}` : null,
+      ].filter(Boolean).join(' · ') : 'Ei pimeää';
+      row.append(day,detail,pill(n.best ?? '–',n.best ? chanceTone(n.best) : 'off'));
+      return row;
+    }));
+    el('history-meta').textContent=`Kp: NOAA SWPC (havaitut). ${h.clouds ? 'Pilvisyys: Open-Meteo (toteutunut).' : 'Pilvisyystietoa ei saatu, joten arvio ei huomioi pilviä.'} Yö = hämärästä aamuun, kun Aurinko on yli 12° horisontin alla.`;
+  } catch(e) {el('history').textContent=e.message;}
+}
+
 // Kaavion valinta: ovaali, Kp tai aurinkotuuli, yksi kerrallaan.
 el('aurora-seg').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;

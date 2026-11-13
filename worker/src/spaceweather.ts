@@ -15,7 +15,7 @@ const G_LABELS = [
   "G5 – äärimmäinen myrsky",
 ];
 
-interface KpPoint {
+export interface KpPoint {
   time_tag: string;
   kp: number;
   kind: string;
@@ -191,12 +191,17 @@ export function parseTs(value: unknown): string {
 
 const swpc = (path: string) => fetchJson(`${SWPC}${path}`, TTL_S).then(asRecords);
 
-async function kpHistory(): Promise<KpPoint[]> {
+/** Kaikki NOAA:n syötteen havaitut Kp-arvot (noin 7 vuorokautta). Revontulihistoria käyttää samaa välimuistissa olevaa hakua. */
+export async function kpObserved(): Promise<KpPoint[]> {
   const rows = await swpc("/products/noaa-planetary-k-index.json");
-  return rows.slice(-24).map((row) => {
+  return rows.map((row) => {
     const kp = Number(row.kp ?? row.Kp ?? 0);
     return { time_tag: parseTs(row.time_tag), kp, kind: "observed", g_scale: kpToGScale(kp) };
   });
+}
+
+async function kpHistory(): Promise<KpPoint[]> {
+  return (await kpObserved()).slice(-24);
 }
 
 async function kpForecast(): Promise<KpPoint[]> {

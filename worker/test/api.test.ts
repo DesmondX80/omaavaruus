@@ -13,6 +13,7 @@ import { getSkyObject, moonPhaseName, skyLight } from "../src/sky";
 import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
 import { moonlessNights, moonPhases } from "../src/moon";
+import { nightHistory } from "../src/history";
 import { GRID_CODEC, ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
@@ -403,6 +404,39 @@ describe("reitit", () => {
     const events = await (await get("/api/events?lat=60.17&lon=24.94")).json<any>();
     expect(events.events.find((e: any) => e.title === "Leonidit").cloud_cover).toBe(30);
     expect(events.events.find((e: any) => e.title === "Geminidit").cloud_cover).toBeNull();
+  });
+
+  it("laskee revontulihistorian viime öiltä", async () => {
+    const now = new Date("2026-11-13T12:00:00Z");
+    const bin = (iso: string, kp: number) => ({ time_tag: iso, kp, kind: "observed", g_scale: 0 });
+    // Kp 6 yöllä 9.–10.11. klo 18–21 UTC, muulloin rauhallista.
+    const kp = Array.from({ length: 64 }, (_, i) => {
+      const t = new Date(Date.parse("2026-11-05T12:00:00Z") + i * 3 * 3_600_000).toISOString();
+      return bin(t, t === "2026-11-09T18:00:00.000Z" ? 6 : 1);
+    });
+    const hour = (iso: string) => Date.parse(iso);
+    const clouds = new Map([[hour("2026-11-09T18:00:00Z"), 95], [hour("2026-11-09T19:00:00Z"), 10], [hour("2026-11-09T20:00:00Z"), 95]]);
+    const nights = nightHistory(65, 25.5, kp as any, clouds, now);
+    expect(nights.map((n) => n.night)).toEqual(["2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12"]);
+    const storm = nights[3];
+    // Selkeä tunti klo 19 riittää erittäin hyvään arvioon, vaikka sitä edeltävä ja seuraava tunti olivat pilvisiä.
+    expect(storm).toMatchObject({ kp_max: 6, best: "Erittäin hyvä", best_time: "2026-11-09T19:00:00.000Z", cloud_mean: 67 });
+    expect(storm.dark_hours).toBeGreaterThan(10);
+    expect(nights[0]).toMatchObject({ kp_max: 1, cloud_mean: null });
+    // Kesäkuussa 65° leveydellä ei tule pimeää: arviota ei ole.
+    const summer = nightHistory(65, 25.5, kp.map((p) => ({ ...p, time_tag: p.time_tag.replace("2026-11", "2026-06") })) as any, new Map(), new Date("2026-06-13T12:00:00Z"));
+    expect(summer.every((n) => n.dark_hours === 0 && n.best === null)).toBe(true);
+
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("noaa-planetary-k-index.json")) return Response.json(kp.map((p) => ({ time_tag: p.time_tag.slice(0, 19), Kp: p.kp })));
+      if (url.startsWith("https://api.open-meteo.com/")) return Response.json({ hourly: { time: ["2026-11-09T19:00"], cloud_cover: [10] } });
+      return new Response("", { status: 404 });
+    }));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const body = await (await get("/api/aurora/history?lat=65&lon=25.5")).json<any>();
+    expect(body.clouds).toBe("Open-Meteo");
+    expect(body.nights[3]).toMatchObject({ night: "2026-11-09", best: "Erittäin hyvä", cloud_mean: 10 });
   });
 
   it("laskee Kuun vaiheet ja kuuttomat yöt", async () => {

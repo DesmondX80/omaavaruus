@@ -26,7 +26,7 @@ yksityiskohdat. Paikan valinta ja kaikki ilmoitusasetukset avautuvat yläpalkist
 (`#nyt`, `#revontulet`, `#taivas`, `#iss`, `#kalenteri`).
 
 - **Avaruussää**: Kp-indeksi (NOAA SWPC) pylväskaaviona kahden vuorokauden havainnoista ja ennusteesta, G-asteikko, aurinkotuulen nopeus ja Bz.
-- **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
+- **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna. Viime öiden historia lasketaan jälkikäteen havaituista Kp-arvoista ja toteutuneesta pilvisyydestä (Open-Meteo).
 - **Revontuliovaali ja aurinkotuuli**: OVATION-mallin ennuste napakarttana (mantereiden ääriviivat Natural Earth 110m) ja aurinkotuulen nopeus, tiheys ja Bz vuorokauden ajalta (NOAA SWPC:n reaaliaikamittaukset, DSCOVR/ACE/IMAP).
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h. Koko näytön tilassa on lisäksi perspektiivinäkymä, jota käännetään sormella tai puhelimen asentoantureilla (DeviceOrientation), ja taustalle voi ottaa takakameran kuvan.
@@ -55,6 +55,7 @@ worker/
     iss.ts           # ISS: ratatiedot (CelesTrak), sijainti ja ylilennot (satellite.js)
     events.ts        # tapahtumakalenteri: meteoriparvet, pimennykset, konjunktiot
     moon.ts          # Kuun vaiheet ja kuuttomat yöt (oma reitti CPU-ajan vuoksi)
+    history.ts       # revontulihistoria viime öiltä (lasketaan, ei tallenneta)
     sky.ts           # astronomy-engine + tähdet ja tähtikuvioiden viivat (stars.ts)
   test/              # vitest: API sekä frontendin tiedostolistojen ja tuontien tarkistus
 frontend/
@@ -105,6 +106,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
 | `GET /api/iss?lat&lon` | ISS:n sijainti ja ylilennot viideksi vuorokaudeksi, näkyvät merkittyinä, reitteineen (`track`) ja ratoineen taivaalla (`sky_track`), sekä aseman rata seuraavan kierroksen ajalta (`orbit`); näkyvillä ylilennoilla pilvisyysennuste (`cloud_cover`, kolme vuorokautta eteenpäin) |
 | `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta ja pilvisyysennuste parhaalle hetkelle (`cloud_cover`, kolme vuorokautta eteenpäin) |
+| `GET /api/aurora/history?lat&lon` | Revontulihistoria seitsemältä viime yöltä: yön suurin havaittu Kp, pimeän ajan pilvisyys ja jälkikäteen laskettu paras arvio |
 | `GET /api/moon?lat&lon` | Kuun neljännekset neljäksi kuukaudeksi ja kuuttomat yöt (Kuu horisontin alla koko pimeän ajan) kahdeksi viikoksi |
 | `GET /api/launches` | 5 seuraavaa laukaisua |
 | `GET /api/sky?lat&lon&at` | Taivaankartta hetkelle |
