@@ -5,7 +5,7 @@ import { events } from './events.js';
 import { initInfo } from './info.js';
 import { iss, initIss } from './iss.js';
 import { launches } from './launches.js';
-import { initNav } from './nav.js';
+import { initNav, VIEWS } from './nav.js';
 import { initNow } from './now.js';
 import { initPlaces } from './places.js';
 import { initPush, renderPush } from './push.js';
@@ -25,4 +25,8 @@ setInterval(weather,300000); setInterval(solarwind,300000); setInterval(iss,6000
 // Yhteyden palatessa tiedot haetaan heti eikä vasta seuraavalla ajastetulla kierroksella.
 window.addEventListener('online',()=>{weather(); sky(); events(); solarwind(); iss();});
 // Service worker tekee sovelluksesta asennettavan ja pitää viimeksi haetut tiedot saatavilla ilman verkkoa.
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service workerin rekisteröinti epäonnistui:',e));
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service workerin rekisteröinti epäonnistui:',e));
+  // Ilmoituksen napautus avoimessa sovelluksessa vaihtaa ilmoituksen näkymään (sw.js).
+  navigator.serviceWorker.addEventListener('message',e=>{if(VIEWS.includes(e.data?.view)) location.hash=`#${e.data.view}`;});
+}

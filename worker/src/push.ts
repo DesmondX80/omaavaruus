@@ -131,7 +131,18 @@ export async function unsubscribe(env: PushEnv, body: Record<string, unknown>) {
 }
 
 /** Lähettää viestin ja poistaa tilauksen, jos push-palvelu kertoo sen lakanneen (404/410). Palauttaa, menikö viesti perille palveluun. */
-async function deliver(env: PushEnv, key: string, sub: Subscription, payload: unknown): Promise<boolean> {
+/**
+ * Ilmoituksen sisältö. `view` on sovelluksen näkymä (osoitteen #-osa), joka avautuu ilmoitusta napautettaessa,
+ * ja `tag` korvaa samalla tunnisteella aiemmin näytetyn ilmoituksen.
+ */
+export interface Notice {
+  title: string;
+  body: string;
+  tag?: string;
+  view: "nyt" | "revontulet" | "iss" | "kalenteri";
+}
+
+async function deliver(env: PushEnv, key: string, sub: Subscription, payload: Notice): Promise<boolean> {
   const status = await sendPush(sub, payload, await vapidKeys(env), env.PUSH_SUBJECT, TTL_S);
   if (status === 404 || status === 410) await env.SUBSCRIPTIONS.delete(key);
   if (status < 200 || status >= 300) console.warn(`Push-palvelu vastasi ${status} (${new URL(sub.endpoint).hostname})`);
@@ -146,6 +157,7 @@ export async function sendTest(env: PushEnv, body: Record<string, unknown>) {
   const ok = await deliver(env, key, sub, {
     title: "OmaAvaruus: testi-ilmoitus",
     body: `Ilmoitukset toimivat. Saat viestin, kun revontuliarvio on vähintään ${sub.threshold.toLowerCase()} (${sub.place}).`,
+    view: "nyt",
   });
   if (!ok) throw new HttpError(502, "Push-palvelu ei hyväksynyt viestiä. Ota ilmoitukset käyttöön uudelleen.");
   return { ok: true };
@@ -208,6 +220,7 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
       const ok = await deliver(env, key, sub, {
         title: `Revontulia voi näkyä nyt – ${sub.place}`,
         body: `Arvio: ${weather.aurora_chance}. ${details.join(", ")}.`,
+        view: "revontulet",
       });
       if (ok) {
         sent++;
@@ -232,6 +245,7 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
           title: `Laukaisu pian: ${launch.name}`,
           body: `${[launch.provider, launch.rocket, launch.location].filter(Boolean).join(" · ")}. Laukaisuun noin ${minutes} min.`,
           tag: `launch-${launch.id}`,
+          view: "kalenteri",
         });
         if (!ok) continue;
         launchesSent++;
@@ -260,6 +274,7 @@ export async function checkSubscriptions(env: PushEnv, now = new Date()) {
           title: `ISS näkyy noin ${minutes} min kuluttua – ${sub.place}`,
           body: `Asema nousee ${from} ja käy ${pass.max_alt}° korkeudella.${pass.magnitude === null ? "" : ` Kirkkaus noin ${pass.magnitude.toLocaleString("fi-FI")} mag.`}`,
           tag: `iss-${pass.visible_start}`,
+          view: "iss",
         });
         if (!ok) continue;
         issSent++;

@@ -5,6 +5,8 @@ const VERSION = "dev";
 const SHELL_CACHE = `shell-${VERSION}`;
 const DATA_CACHE = "data-v1";
 const DATA_MAX_ENTRIES = 30;
+// Sovelluksen näkymät (js/nav.js), joihin ilmoitus voi viedä.
+const VIEWS = ["nyt", "revontulet", "taivas", "iss", "kalenteri"];
 
 // Sovelluksen tiedostot, jotka haetaan talteen heti asennuksessa (testi varmistaa, että lista kattaa frontend-hakemiston).
 const SHELL = [
@@ -83,17 +85,23 @@ self.addEventListener("push", (event) => {
       // Sama tunniste korvaa aiemman ilmoituksen: revontulista näkyy vain tuorein, kustakin laukaisusta omansa.
       tag: data.tag ?? "aurora",
       renotify: true,
+      // Näkymä, joka avataan napautuksesta. Vanhassa viestissä sitä ei ole, jolloin avautuu etusivu.
+      data: { view: VIEWS.includes(data.view) ? data.view : null },
     }),
   );
 });
 
-// Ilmoituksen napautus tuo avoimen sovelluksen esiin tai avaa sen.
+// Ilmoituksen napautus tuo avoimen sovelluksen esiin ja vaihtaa sen ilmoituksen näkymään, tai avaa sovelluksen siihen näkymään.
+// Avoin ikkuna vaihtaa näkymän itse viestin perusteella (js/main.js), jolloin sivua ei ladata uudelleen.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const view = event.notification.data?.view ?? null;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
       const open = windows.find((client) => "focus" in client);
-      return open ? open.focus() : self.clients.openWindow("./");
+      if (!open) return self.clients.openWindow(view ? `./#${view}` : "./");
+      if (view) open.postMessage({ view });
+      return open.focus();
     }),
   );
 });
