@@ -1,5 +1,5 @@
 // Revontulet-näkymä: arvio nyt, tuntiennuste, arvioon vaikuttavat tekijät ja Kp-kaavio.
-import { state, el, json, hhmm, num, publish } from './core.js';
+import { state, el, json, hhmm, num, publish, row, dayLabel } from './core.js';
 import { infoBtn } from './info.js';
 import { placeLabel } from './places.js';
 
@@ -136,6 +136,30 @@ export async function weather() {
     drawKp(el('kp-chart'),w);
     publish('weather',{...w, fetched:Date.now()});
   } catch(e) {el('aurora').textContent=e.message;}
+}
+
+// Auringon tilanne: Maahan suuntautuvat CME:t (NASA DONKI, WSA-Enlil) ja viimeaikaiset M- ja X-luokan purkaukset (NOAA).
+export async function sunStatus() {
+  try {
+    const s=await json('/api/sun');
+    publish('sun',s);
+    const when=t=>`${dayLabel(t)} klo ${hhmm(t)}`;
+    const empty=text=>Object.assign(document.createElement('div'),{className:'muted',textContent:text});
+    el('sun-cmes').replaceChildren(...(s.cmes===null ? [empty(`CME-ennustetta ei saatu (${s.cmes_error}).`)]
+      : s.cmes.length ? s.cmes.map(c=>row({kind:c.glancing ? '' : 'launch', iconName:'sun',
+          title:c.glancing ? 'CME, sivuosuma Maahan' : 'CME osuu Maahan',
+          details:[
+            `Saapuu arviolta ${when(c.arrival)} (± ${s.arrival_uncertainty_h} h)`,
+            c.kp_max==null ? null : `Mallin Kp-arvio ${c.kp_min===c.kp_max ? num(c.kp_max) : `${num(c.kp_min)}–${num(c.kp_max)}`}`,
+            c.start && `Lähti Auringosta ${when(c.start)}${c.speed ? ` · ${num(c.speed)} km/s` : ''}`,
+          ],
+          when:dayLabel(c.arrival), whenSub:`klo ${hhmm(c.arrival)}`}))
+      : [empty('Ei Maahan suuntautuvia koronan massapurkauksia (CME) NASA:n ennusteessa.')]));
+    el('sun-flares').replaceChildren(...(s.flares===null ? [empty(`Purkauslistaa ei saatu (${s.flares_error}).`)]
+      : s.flares.length ? s.flares.map(f=>Object.assign(document.createElement('span'),{className:`chip flare-${f.class[0].toLowerCase()}`, textContent:`${f.class} · ${when(f.peak)}`}))
+      : [empty('Ei M- tai X-luokan purkauksia kolmeen vuorokauteen.')]));
+    el('sun-meta').textContent='CME:t: NASA DONKI (WSA-Enlil-malli). Purkaukset: NOAA SWPC (GOES), M- ja X-luokka kolmelta vuorokaudelta.';
+  } catch(e) {el('sun-cmes').textContent=e.message;}
 }
 
 // Viime yöt: arvio jälkikäteen havaitusta Kp:stä, toteutuneesta pilvisyydestä ja valoisuudesta (palvelin laskee, ks. history.ts).

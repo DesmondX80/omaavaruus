@@ -27,6 +27,7 @@ yksityiskohdat. Paikan valinta ja kaikki ilmoitusasetukset avautuvat yläpalkist
 
 - **Avaruussää**: Kp-indeksi (NOAA SWPC) pylväskaaviona kahden vuorokauden havainnoista ja ennusteesta, G-asteikko, aurinkotuulen nopeus ja Bz.
 - **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna. Viime öiden historia lasketaan jälkikäteen havaituista Kp-arvoista ja toteutuneesta pilvisyydestä (Open-Meteo).
+- **Auringon tilanne**: Maahan suuntautuvien koronan massapurkausten (CME) arvioidut saapumisajat ja Kp-arviot NASA:n DONKI-palvelusta (WSA-Enlil-malli) sekä viimeaikaiset M- ja X-luokan röntgenpurkaukset (NOAA SWPC, GOES). Lähipäivinä saapuva CME näkyy myös Nyt-näkymän yhteenvedossa.
 - **Revontuliovaali ja aurinkotuuli**: OVATION-mallin ennuste napakarttana (mantereiden ääriviivat Natural Earth 110m) ja aurinkotuulen nopeus, tiheys ja Bz vuorokauden ajalta (NOAA SWPC:n reaaliaikamittaukset, DSCOVR/ACE/IMAP).
 - **Paikan valinta**: oma sijainti (selaimen paikannus) tai nimellä haettu paikka (Open-Meteo Geocoding). Haetut paikat ja valinta tallentuvat selaimen localStorageen.
 - **Taivaankartta**: Aurinko, Kuu, seitsemän planeettaa ja noin 110 tähteä atsimuutti-korkeuskoordinaateissa ([astronomy-engine](https://github.com/cosinekitty/astronomy)). 16 tähtikuvion viivat ja ilmansuunnat horisontin reunalla. Kohteen napautus näyttää sen nousu- ja laskuajan sekä korkeimman kohdan. Aikaslider ±12 h. Koko näytön tilassa on lisäksi perspektiivinäkymä, jota käännetään sormella tai puhelimen asentoantureilla (DeviceOrientation), ja taustalle voi ottaa takakameran kuvan.
@@ -57,6 +58,7 @@ worker/
     events.ts        # tapahtumakalenteri: meteoriparvet, pimennykset, konjunktiot
     moon.ts          # Kuun vaiheet ja kuuttomat yöt (oma reitti CPU-ajan vuoksi)
     history.ts       # revontulihistoria viime öiltä (lasketaan, ei tallenneta)
+    sun.ts           # Auringon tilanne: purkaukset (NOAA) ja Maahan osuvat CME:t (NASA DONKI)
     sky.ts           # astronomy-engine + tähdet ja tähtikuvioiden viivat (stars.ts)
   test/              # vitest: API sekä frontendin tiedostolistojen ja tuontien tarkistus
 frontend/
@@ -83,6 +85,8 @@ Push `main`-haaraan julkaisee muutokset automaattisesti:
   muuttujan `OMAVARUUS_API` (Workerin osoite) `config.js`:ään ja asettaa commitin
   tunnisteen service workerin versioksi (`sw.js`).
 
+CME-ennusteet haetaan NASA:n API:sta. Ilman omaa avainta käytetään julkista `DEMO_KEY`-avainta, jonka kiintiö on pieni (noin 10 kutsua tunnissa IP-osoitetta kohden); oman maksuttoman avaimen saa osoitteesta https://api.nasa.gov, ja se asetetaan komennolla `npx wrangler secret put NASA_API_KEY` (hakemistossa `worker/`).
+
 Ilmoitukset käyttävät KV-nimiavaruutta `SUBSCRIPTIONS` (`worker/wrangler.toml`). VAPID-avainpari
 luodaan ensimmäisellä käyttökerralla ja säilytetään samassa nimiavaruudessa, joten salaisuuksia
 ei tarvitse asettaa käsin. Tilauksesta tallennetaan selaimen push-osoite ja paikan sijainti
@@ -107,6 +111,7 @@ Käsin: `npx wrangler login` ja `make deploy`. Sallitut CORS-originit ovat
 | `POST /api/push/test` | Lähettää testi-ilmoituksen tallennettuun tilaukseen (`endpoint`) |
 | `GET /api/iss?lat&lon&sat` | Avaruusaseman (`sat=iss` oletuksena, `sat=css` Tiangong) sijainti ja ylilennot viideksi vuorokaudeksi, näkyvät merkittyinä, reitteineen (`track`) ja ratoineen taivaalla (`sky_track`), sekä aseman rata seuraavan kierroksen ajalta (`orbit`); näkyvillä ylilennoilla pilvisyysennuste (`cloud_cover`, kolme vuorokautta eteenpäin) |
 | `GET /api/events?lat&lon` | Seuraavan vuoden meteoriparvet, pimennykset ja konjunktiot sekä niiden näkyvyys paikalta ja pilvisyysennuste parhaalle hetkelle (`cloud_cover`, kolme vuorokautta eteenpäin) |
+| `GET /api/sun` | Maahan osuvat CME:t (`cmes`: saapuminen, sivuosuma, Kp-arvio, lähtö ja nopeus) ja M- ja X-luokan purkaukset kolmelta vuorokaudelta (`flares`) |
 | `GET /api/aurora/history?lat&lon` | Revontulihistoria seitsemältä viime yöltä: yön suurin havaittu Kp, pimeän ajan pilvisyys ja jälkikäteen laskettu paras arvio |
 | `GET /api/moon?lat&lon` | Kuun neljännekset neljäksi kuukaudeksi ja kuuttomat yöt (Kuu horisontin alla koko pimeän ajan) kahdeksi viikoksi |
 | `GET /api/launches` | 5 seuraavaa laukaisua |

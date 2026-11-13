@@ -15,7 +15,7 @@ const passHeight = alt => alt<10 ? 'matalalla ' : alt>=30 ? 'korkealla ' : '';
  * Syyt katsoa taivaalle tärkeysjärjestyksessä. Kukin syy: title (osat, joista strong korostetaan), tone ('good' tai 'mid'),
  * view (näkymä, josta lisää tietoa) ja short (lyhyt muoto ”Myös”-riville). hhmm muotoilee kellonajan.
  */
-export function reasons({weather, iss, events}, now, hhmm) {
+export function reasons({weather, iss, events, sun}, now, hhmm) {
   const end=now+DAY, list=[];
   const best=weather?.best_window;
   if(best && Date.parse(best.start)<end) {
@@ -37,6 +37,14 @@ export function reasons({weather, iss, events}, now, hhmm) {
     const clock=`klo ${hhmm(e.best_time)}`;
     list.push({score:e.cloud_cover>=CLOUDY ? 1 : 2, at, tone:'good', view:'kalenteri',
       title:[{text:`${e.title}: paras hetki `},{text:clock, strong:true}], short:`${e.title} ${clock}`});
+  }
+  // Maahan osuva CME seuraavan puolentoista vuorokauden aikana: revontulia voi olla odotettavissa, vaikka Kp on vielä matala.
+  const cme=(sun?.cmes ?? []).find(c=>!c.glancing && Date.parse(c.arrival)>=now-12*3600000 && Date.parse(c.arrival)<now+1.5*DAY);
+  if(cme) {
+    const clock=`klo ${hhmm(cme.arrival)}`;
+    list.push({score:2, at:Date.parse(cme.arrival), tone:'mid', view:'revontulet',
+      title:[{text:'CME saapuu arviolta '},{text:clock, strong:true},{text:cme.kp_max==null ? '' : `, Kp jopa ${cme.kp_max}`}],
+      short:`CME saapuu arviolta ${clock}`});
   }
   return list.sort((a,b)=>b.score-a.score || a.at-b.at);
 }

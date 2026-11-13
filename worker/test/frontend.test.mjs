@@ -131,6 +131,13 @@ describe("Nyt-näkymän yhteenveto", async () => {
     expect(text(o)).toBe("Ei revontulia eikä näkyviä ylilentoja seuraavan vuorokauden aikana");
   });
 
+  it("nostaa Maahan osuvan CME:n syyksi", () => {
+    const sun = { cmes: [{ arrival: "2026-11-17T02:00:00Z", glancing: false, kp_max: 7 }, { arrival: "2026-11-16T20:00:00Z", glancing: true, kp_max: 5 }] };
+    const o = outlook({ weather: weather(null), sun }, now, hhmm);
+    expect(text(o)).toBe("CME saapuu arviolta klo 02:00, Kp jopa 7");
+    expect(o).toMatchObject({ tone: "mid", view: "revontulet" });
+  });
+
   it("kertoo pilvisestä yöstä", () => {
     const hours = (cloud) => Array.from({ length: 8 }, (_, i) => ({ light: i < 2 ? "Valoisaa" : "Pimeää", cloud_cover: cloud }));
     expect(overcastNight(weather(null, hours(95)))).toBe(true);

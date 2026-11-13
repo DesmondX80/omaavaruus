@@ -14,6 +14,7 @@ import { BRIGHT_STARS, CONSTELLATIONS } from "../src/stars";
 import { memoryKv } from "./helpers";
 import { moonlessNights, moonPhases } from "../src/moon";
 import { nightHistory } from "../src/history";
+import { parseCmeArrivals, parseFlares } from "../src/sun";
 import { GRID_CODEC, ovationAt, ovationLevel, ovationMap, parseOvation } from "../src/ovation";
 import { auroraChance, bestWindow, cloudAdjustedChance, kpToGScale, lightLabel, parseTs, visibleChance } from "../src/spaceweather";
 
@@ -437,6 +438,46 @@ describe("reitit", () => {
     const body = await (await get("/api/aurora/history?lat=65&lon=25.5")).json<any>();
     expect(body.clouds).toBe("Open-Meteo");
     expect(body.nights[3]).toMatchObject({ night: "2026-11-09", best: "Erittäin hyvä", cloud_mean: 10 });
+  });
+
+  it("poimii purkaukset ja Maahan osuvat CME:t", async () => {
+    const now = new Date("2026-11-13T18:00:00Z");
+    const flare = (max_class: string, max_time: string) => ({ begin_time: max_time, max_time, max_class });
+    expect(parseFlares([flare("C5.0", "2026-11-13T10:00:00Z"), flare("M1.2", "2026-11-12T08:00:00Z"), flare("X1.0", "2026-11-09T08:00:00Z"), flare("M3.4", "2026-11-13T14:21:00Z")], now))
+      .toEqual([
+        { class: "M3.4", begin: "2026-11-13T14:21:00.000Z", peak: "2026-11-13T14:21:00.000Z" },
+        { class: "M1.2", begin: "2026-11-12T08:00:00.000Z", peak: "2026-11-12T08:00:00.000Z" },
+      ]);
+    const sim = (id: string, completed: string, arrival: string | null, extra: object = {}) => ({
+      modelCompletionTime: completed, estimatedShockArrivalTime: arrival, isEarthGB: false, kp_18: null, kp_90: 5, kp_135: 6, kp_180: 7,
+      cmeInputs: [{ cmeid: id, cmeStartTime: "2026-11-12T03:24Z", speed: 900, isMostAccurate: true }], ...extra,
+    });
+    const arrivals = parseCmeArrivals([
+      sim("A", "2026-11-12T10:00Z", "2026-11-15T02:00Z"),
+      // Uudempi ajo samasta CME:stä korvaa vanhemman.
+      sim("A", "2026-11-13T09:00Z", "2026-11-14T20:00Z", { kp_180: 8 }),
+      sim("B", "2026-11-13T09:00Z", null),
+      sim("C", "2026-11-13T09:00Z", "2026-11-10T00:00Z"),
+      sim("D", "2026-11-13T12:00Z", "2026-11-16T06:00Z", { isEarthGB: true, kp_90: null, kp_135: null, kp_180: null }),
+    ], now);
+    expect(arrivals).toEqual([
+      { arrival: "2026-11-14T20:00:00.000Z", glancing: false, kp_min: 5, kp_max: 8, start: "2026-11-12T03:24:00.000Z", speed: 900 },
+      { arrival: "2026-11-16T06:00:00.000Z", glancing: true, kp_min: null, kp_max: null, start: "2026-11-12T03:24:00.000Z", speed: 900 },
+    ]);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.startsWith("https://api.nasa.gov/")) return new Response("", { status: 429 });
+      return Response.json([flare("M3.4", "2026-11-13T14:21:00Z")]);
+    }));
+    const body = await (await get("/api/sun")).json<any>();
+    expect(body.flares).toHaveLength(1);
+    // CME-haun epäonnistuminen ei estä purkauksia; avain ei näy virheessä.
+    expect(body).toMatchObject({ cmes: null, cmes_error: "HTTP 429" });
+    expect(calls.find((u) => u.startsWith("https://api.nasa.gov/"))).toContain("api_key=DEMO_KEY");
   });
 
   it("laskee Kuun vaiheet ja kuuttomat yöt", async () => {

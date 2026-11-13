@@ -14,7 +14,7 @@ const LINKS = {revontulet:'Näytä ennuste ja perustelut ›', iss:'Näytä ylil
 // Yhteenveto päivittyy, kun mikä tahansa sen lähteistä (revontulet, ISS, tapahtumat) on haettu.
 function renderOutlook() {
   const w=store.weather; if(!w) return;
-  const o=outlook({weather:w, iss:store.iss, events:store.events}, Date.now(), hhmm);
+  const o=outlook({weather:w, iss:store.iss, events:store.events, sun:store.sun}, Date.now(), hhmm);
   el('now-verdict').className=`verdict ${o.tone}`;
   el('now-eyebrow').textContent=`Seuraavat 24 h · ${placeLabel()}`;
   el('now-title').replaceChildren(...o.title.map(part=>{

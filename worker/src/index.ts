@@ -11,6 +11,7 @@ import { getOvation, ovationMap } from "./ovation";
 import { getSkyChart, getSkyObject } from "./sky";
 import { getSolarWind } from "./solarwind";
 import { getSpaceWeather } from "./spaceweather";
+import { getSun } from "./sun";
 
 export interface Env extends PushEnv {
   DEFAULT_LAT: string;
@@ -19,6 +20,8 @@ export interface Env extends PushEnv {
   DEFAULT_PLACE: string;
   LAUNCH_LIMIT: string;
   CORS_ORIGINS: string;
+  /** NASA:n API-avain DONKI-palveluun (valinnainen secret); ilman sitä käytetään julkista DEMO_KEY-avainta. */
+  NASA_API_KEY?: string;
 }
 
 /** Tapahtumakalenteri muuttuu hitaasti, joten laskettu vuosi kelpaa tunteja. */
@@ -87,6 +90,8 @@ async function route(url: URL, env: Env): Promise<unknown> {
       chart.objects.unshift(...(await satelliteSkyObjects(lat(), lon(), at)));
       return chart;
     }
+    case "/api/sun":
+      return getSun(env.NASA_API_KEY);
     case "/api/solarwind":
       return getSolarWind().catch((exc) => {
         throw new HttpError(503, `Aurinkotuulen haku epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
