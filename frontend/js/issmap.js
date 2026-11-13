@@ -110,7 +110,7 @@ const scaleKm = maxKm => [5000,2000,1000,500,200,100].find(v=>v<=maxKm) ?? 50;
  * station: aseman sijainti nyt tai null, circle: 'station' tai 'observer' sen mukaan, kumman ympärille näkyvyysalue piirretään,
  * orbit: aseman rata nykyhetken ympäriltä, pass: ylilento reitteineen, time: kellonajan muotoilu.
  */
-export function drawMap(canvas, {center, radiusKm, observer, station=null, circle='observer', orbit=null, pass=null, heightKm=420, minElevation=5, time, now=Date.now()}) {
+export function drawMap(canvas, {center, radiusKm, observer, station=null, stationName='ISS', circle='observer', orbit=null, pass=null, heightKm=420, minElevation=5, time, now=Date.now()}) {
   const w=canvas.clientWidth, h=canvas.clientHeight, scale=window.devicePixelRatio||1;
   if(!w||!h) return;
   canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
@@ -195,7 +195,7 @@ export function drawMap(canvas, {center, radiusKm, observer, station=null, circl
   if(site) {dot(site[0],site[1],3.5,'#5ed6ff'); label(observer.label,site[0],site[1]+15,'#5ed6ff');}
   if(iss) {
     ctx.beginPath(); ctx.arc(iss[0],iss[1],7,0,2*Math.PI); ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
-    dot(iss[0],iss[1],3.5,'#fff'); label('ISS',iss[0],iss[1]-11,'#fff');
+    dot(iss[0],iss[1],3.5,'#fff'); label(stationName,iss[0],iss[1]-11,'#fff');
   }
 
   label('P ↑',w-8,16,'#8b9ac0','right');

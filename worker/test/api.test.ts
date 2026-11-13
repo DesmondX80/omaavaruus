@@ -4,7 +4,7 @@ import worker, { type Env } from "../src/index";
 import { cloudAt, parseFmiSimple } from "../src/clouds";
 import { getEvents } from "../src/events";
 import { findPasses, issPosition, parseTle } from "../src/iss";
-import { ISS_TLE } from "./helpers";
+import { CSS_TLE, ISS_TLE } from "./helpers";
 import { binSolarWind } from "../src/solarwind";
 import { parsePlaces } from "../src/geocode";
 import { asRecords, cached, clearCache, sharedCacheWorks } from "../src/http";
@@ -463,8 +463,9 @@ describe("reitit", () => {
   it("palauttaa ISS-reitin ja lisää aseman taivaankartalle", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-16T16:52:00Z"));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(ISS_TLE)));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(url.includes("CATNR=48274") ? CSS_TLE : ISS_TLE)));
     const body = await (await get("/api/iss?lat=60.17&lon=24.94")).json<any>();
+    expect(body.satellite).toEqual({ id: "iss", name: "ISS" });
     expect(body.position.alt).toBeGreaterThan(5);
     expect(body.passes[0].visible_start).toBeTruthy();
     // Pilvisyysennuste ei ollut saatavilla (haku palautti ratatiedot), mutta ylilennot tulevat silti.
@@ -482,6 +483,24 @@ describe("reitit", () => {
     expect(detail).toMatchObject({ kind: "iss", visibility: "rises" });
     expect(Date.parse(detail.rise)).toBeLessThan(Date.now());
     vi.useRealTimers();
+  });
+
+  it("laskee Tiangongin ylilennot omalla pyynnöllään", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T16:00:00Z"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(url.includes("CATNR=48274") ? CSS_TLE : ISS_TLE)));
+    // Madridissa (40°) Tiangong nousee korkealle: rata on kallistunut 41,5°.
+    const body = await (await get("/api/iss?lat=40.42&lon=-3.7&sat=css")).json<any>();
+    expect(body.satellite).toEqual({ id: "css", name: "Tiangong" });
+    expect(body.tle_epoch.slice(0, 10)).toBe("2026-11-13");
+    expect(body.passes.length).toBeGreaterThan(5);
+    expect(Math.max(...body.passes.map((p: any) => p.max_alt))).toBeGreaterThan(60);
+    expect(Math.abs(body.position.lat)).toBeLessThanOrEqual(42);
+    // Oulusta (65°) Tiangong ei nouse lainkaan.
+    expect((await (await get("/api/iss?lat=65&lon=25.5&sat=css")).json<any>()).passes).toEqual([]);
+    expect((await get("/api/iss?lat=65&lon=25.5&sat=hubble")).status).toBe(422);
+    const detail = await (await get("/api/sky/object?lat=40.42&lon=-3.7&name=Tiangong")).json<any>();
+    expect(detail).toMatchObject({ name: "Tiangong", kind: "iss", visibility: "rises" });
   });
 
   it("hylkää virheellisen leveysasteen", async () => {

@@ -127,6 +127,7 @@ h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .seg button { min-height: 32px; padding: 6px 8px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 13px; }
 .seg button[aria-pressed="true"] { background: var(--raised); color: var(--fg); }
 .pane { display: grid; gap: 10px; }
+.sat-seg { min-width: 170px; }
 
 .history { display: grid; gap: 2px; }
 .night { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }

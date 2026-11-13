@@ -6,7 +6,7 @@ import { getAuroraHistory } from "./history";
 import { getLaunches } from "./launches";
 import { getMoon } from "./moon";
 import { checkSubscriptions, pushPublicKey, sendTest, subscribe, unsubscribe, type PushEnv } from "./push";
-import { getIss, ISS_NAME, issSkyDetail, issSkyObject } from "./iss";
+import { getIss, issSkyDetail, satByName, satelliteSkyObjects, SATELLITES, type SatId } from "./iss";
 import { getOvation, ovationMap } from "./ovation";
 import { getSkyChart, getSkyObject } from "./sky";
 import { getSolarWind } from "./solarwind";
@@ -83,9 +83,8 @@ async function route(url: URL, env: Env): Promise<unknown> {
         if (exc instanceof HttpError) throw exc;
         throw new HttpError(503, `Taivaankartan laskenta epäonnistui: ${exc}`);
       }
-      // Avaruusasema lisätään, kun se on horisontin yläpuolella; ratatietojen puuttuminen ei estä karttaa.
-      const iss = await issSkyObject(lat(), lon(), at);
-      if (iss) chart.objects.unshift(iss);
+      // Avaruusasemat lisätään, kun ne ovat horisontin yläpuolella; ratatietojen puuttuminen ei estä karttaa.
+      chart.objects.unshift(...(await satelliteSkyObjects(lat(), lon(), at)));
       return chart;
     }
     case "/api/solarwind":
@@ -100,10 +99,13 @@ async function route(url: URL, env: Env): Promise<unknown> {
           throw new HttpError(503, `Revontulimallin haku epäonnistui: ${exc instanceof HttpError ? `NOAA SWPC ${exc.detail}` : exc}`);
         });
     }
-    case "/api/iss":
-      return getIss(lat(), lon()).catch((exc) => {
-        throw new HttpError(503, `ISS:n laskenta epäonnistui: ${exc instanceof HttpError ? `CelesTrak ${exc.detail}` : exc}`);
+    case "/api/iss": {
+      const sat = (url.searchParams.get("sat") || "iss") as SatId;
+      if (!(sat in SATELLITES)) throw new HttpError(422, `Parametrin sat pitää olla jokin näistä: ${Object.keys(SATELLITES).join(", ")}.`);
+      return getIss(lat(), lon(), new Date(), sat).catch((exc) => {
+        throw new HttpError(503, `${SATELLITES[sat].name}: laskenta epäonnistui: ${exc instanceof HttpError ? `CelesTrak ${exc.detail}` : exc}`);
       });
+    }
     case "/api/events": {
       // Näkyvyys ei muutu kymmenen kilometrin matkalla, joten pyöristys antaa lähekkäisille paikoille saman välimuistin.
       const [la, lo] = [lat(), lon()].map((value) => Math.round(value * 10) / 10);
@@ -134,9 +136,10 @@ async function route(url: URL, env: Env): Promise<unknown> {
     case "/api/sky/object": {
       const name = (url.searchParams.get("name") ?? "").trim();
       const at = parseAt(url.searchParams.get("at"));
-      if (name === ISS_NAME) {
-        return issSkyDetail(lat(), lon(), at).catch((exc) => {
-          throw new HttpError(503, `ISS:n laskenta epäonnistui: ${exc instanceof HttpError ? exc.detail : exc}`);
+      const sat = satByName(name);
+      if (sat) {
+        return issSkyDetail(lat(), lon(), at, sat).catch((exc) => {
+          throw new HttpError(503, `${name}: laskenta epäonnistui: ${exc instanceof HttpError ? exc.detail : exc}`);
         });
       }
       const object = getSkyObject(lat(), lon(), Number(env.DEFAULT_ELEVATION_M), at, name);

@@ -154,7 +154,12 @@
     <section class="view" id="view-iss" aria-label="ISS" hidden>
       <div class="cols">
         <div class="panel" id="iss">
-          <h2 class="info-host" data-info-slot="iss">Avaruusasema</h2>
+          <div class="head"><h2 class="info-host" data-info-slot="iss">Avaruusasema</h2>
+            <div class="seg sat-seg" id="sat-seg" role="group" aria-label="Avaruusasema">
+              <button type="button" data-sat="iss" aria-pressed="true">ISS</button>
+              <button type="button" data-sat="css" aria-pressed="false">Tiangong</button>
+            </div>
+          </div>
           <div id="iss-now">Ladataan…</div>
       <div id="iss-map-box" class="iss-map-box" hidden>
         <div class="iss-map-bar">

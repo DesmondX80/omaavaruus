@@ -10,7 +10,9 @@ export const dir = az => DIRECTIONS[Math.round(az/45)%8];
 const day = t => new Date(t).toLocaleDateString('fi-FI',{weekday:'short',day:'numeric',month:'numeric'});
 const where = p => `${num(Math.abs(p.lat),1)}°${p.lat>=0?'P':'E'}, ${num(Math.abs(p.lon),1)}°${p.lon>=0?'I':'L'}`;
 // Kartalla näytettävä ylilento (alkuhetki tunnisteena) säilyy, kun tiedot päivittyvät minuutin välein.
-let data=null, selected=null;
+// Näkymässä on valittu asema (ISS tai Tiangong). ISS haetaan aina, koska Nyt-kooste, taivaankartta ja ilmoitukset käyttävät sitä.
+let data=null, selected=null, sat='iss';
+const fetched={iss:null, css:null};
 // Kartan näkymä: 'station' seuraa asemaa, 'pass' näyttää valitun ylilennon havaintopaikan ympäristössä.
 // Säde on kartan lyhyemmän sivun puolikas kilometreinä, kummallekin näkymälle omansa.
 let mode='station';
@@ -51,7 +53,7 @@ function drawMap() {
   el('iss-zoom-in').disabled=radius[mode]<=RADIUS_MIN; el('iss-zoom-out').disabled=radius[mode]>=RADIUS_MAX;
   paintMap(el('iss-map'),{
     center:viewCenter(), radiusKm:radius[mode], observer, station, circle:onPass ? 'observer' : 'station',
-    orbit:onPass ? null : data.orbit ?? null, pass:onPass ? pass : null, heightKm:data.position.height_km, time:hhmm,
+    orbit:onPass ? null : data.orbit ?? null, pass:onPass ? pass : null, heightKm:data.position.height_km, time:hhmm, stationName:data.satellite?.name ?? 'ISS',
   });
 }
 
@@ -132,7 +134,8 @@ export function initIss() {
   el('iss-prev').addEventListener('click',()=>step(-1));
   el('iss-next').addEventListener('click',()=>step(1));
   el('iss-full').addEventListener('click',openFull);
-  el('iss-sky-link').addEventListener('click',()=>{closeFull(); showPassOnSky(selected);});
+  el('iss-sky-link').addEventListener('click',()=>{closeFull(); showPassOnSky(selectedPass(), data.satellite.name);});
+  el('sat-seg').addEventListener('click',e=>{const b=e.target.closest('[data-sat]'); if(b&&b.dataset.sat!==sat) chooseSat(b.dataset.sat);});
   el('iss-close').addEventListener('click',()=>closeFull());
   for(const b of el('iss-map-box').querySelectorAll('[data-map-mode]')) b.addEventListener('click',()=>setMode(b.dataset.mapMode));
   el('iss-zoom-in').addEventListener('click',()=>zoomTo(radius[mode]/1.5));
@@ -162,16 +165,16 @@ function renderNotify() {
 }
 
 /** Aseman tilanne lauseena: taivaalla (korkeus ja suunta) tai minkä kohdan yllä se on. */
-export function issNowText() {
-  if(!data) return '';
-  const p=data.position;
+export function issNowText(d=fetched.iss) {
+  if(!d) return '';
+  const p=d.position;
   return p.alt>0
-    ? `Asema on nyt taivaalla: korkeus ${num(p.alt)}°, suunta ${dir(p.az)} · ${p.sunlit?'auringonvalossa':'Maan varjossa'}`
-    : `Asema on nyt kohdan ${where(p)} yllä ${num(p.height_km)} km korkeudella, ${num(p.range_km)} km päässä.`;
+    ? `${d.satellite.name} on nyt taivaalla: korkeus ${num(p.alt)}°, suunta ${dir(p.az)} · ${p.sunlit?'auringonvalossa':'Maan varjossa'}`
+    : `${d.satellite.name} on nyt kohdan ${where(p)} yllä ${num(p.height_km)} km korkeudella, ${num(p.range_km)} km päässä.`;
 }
 
 function render() {
-  el('iss-now').textContent=issNowText();
+  el('iss-now').textContent=issNowText(data);
   const visible=visiblePasses();
   if(!visible.some(x=>x.start===selected)) selected=visible[0]?.start ?? null;
   el('iss-passes').replaceChildren(...(visible.length ? visible.map(x=>{
@@ -183,14 +186,29 @@ function render() {
     pick.classList.add('pass-pick'); pick.dataset.start=x.start; pick.setAttribute('aria-pressed',String(x.start===selected));
     pick.addEventListener('click',()=>select(x.start,true));
     li.append(pick); return li;
-  }) : [Object.assign(document.createElement('li'),{className:'muted',textContent:`Ei näkyviä ylilentoja viiteen vuorokauteen (ylilentoja yhteensä ${data.passes.length}, mutta asema on silloin Maan varjossa tai taivas on liian valoisa).`})]));
+  }) : [Object.assign(document.createElement('li'),{className:'muted',textContent:data.passes.length
+    ? `Ei näkyviä ylilentoja viiteen vuorokauteen (ylilentoja yhteensä ${data.passes.length}, mutta asema on silloin Maan varjossa tai taivas on liian valoisa).`
+    // Tiangongin rata on kallistunut 41,5°: pohjoisempana se ei nouse horisontin yläpuolelle.
+    : `${data.satellite.name} ei nouse tältä paikalta 5° korkeammalle viiden vuorokauden aikana. Sen rata ulottuu vain ${data.satellite.id==='css'?'41,5':'51,6'}° leveydelle.`})]));
   el('iss-meta').textContent=`Ratatiedot CelesTrak, epookki ${day(data.tle_epoch)} ${hhmm(data.tle_epoch)}. Ylilento alkaa ja päättyy 5° korkeudella.${data.cloud_provider ? ` Pilvisyysennuste ${data.cloud_provider}, kolme vuorokautta eteenpäin.` : ''}`;
   drawMap();
 }
 
+const load = id => json(`/api/iss?lat=${state.lat}&lon=${state.lon}&sat=${id}`).then(d=>(fetched[id]=d));
+
 export async function iss() {
-  try {data=await json(`/api/iss?lat=${state.lat}&lon=${state.lon}`); render(); publish('iss',data);}
-  catch(e) {el('iss-meta').textContent=e.message;}
+  try {
+    const [issData]=await Promise.all([load('iss'), sat==='iss' ? null : load(sat)]);
+    data=fetched[sat]; render(); publish('iss',issData);
+  } catch(e) {el('iss-meta').textContent=e.message;}
   renderNotify();
+}
+
+// Aseman vaihto: kartta palaa seuraamaan asemaa ja ylilentovalinta nollautuu.
+async function chooseSat(id) {
+  sat=id; selected=null; mode='station'; pan=null;
+  for(const b of el('sat-seg').children) b.setAttribute('aria-pressed',String(b.dataset.sat===id));
+  try {data=fetched[id] ?? await load(id); render();}
+  catch(e) {el('iss-meta').textContent=e.message;}
 }
 document.addEventListener('pushchange',renderNotify);
