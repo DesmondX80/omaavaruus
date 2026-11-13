@@ -1,5 +1,6 @@
 // Perspektiivinäkymä taivaasta koko näytön tilaan: suuntaa ohjataan sormella tai puhelimen asentoantureilla,
 // ja taustalla voi olla takakameran kuva. Koordinaatisto on paikallinen ENU: x itään, y pohjoiseen, z ylös.
+import { arcPoints } from './skychart.js';
 
 const RAD = Math.PI / 180;
 const COLORS = { planet: '#ffb547', star: '#e8eefc', sun: '#ffd75e', moon: '#c9d6f0', iss: '#5ed6ff' };
@@ -110,6 +111,17 @@ export function createSkyView(canvas, { onSelect, onStatus }) {
       }
     }
     ctx.strokeStyle = 'rgba(94,130,210,.55)'; ctx.lineWidth = 1; ctx.stroke();
+
+    // ISS-ylilennon kaari: koko ylilento katkoviivana, näkyvä osuus paksuna (kuten taivaankartalla).
+    const pass = chart.iss_pass;
+    if (pass?.sky_track) {
+      const line = (points) => {
+        ctx.beginPath(); let pen = false;
+        for (const [alt, az] of points) { const p = at(vector(alt, az)); if (!p) { pen = false; continue; } pen ? ctx.lineTo(...p) : ctx.moveTo(...p); pen = true; }
+      };
+      line(arcPoints(pass)); ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(139,154,192,.8)'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+      line(arcPoints(pass, Date.parse(pass.visible_start), Date.parse(pass.visible_end))); ctx.strokeStyle = '#ffb547'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke();
+    }
     ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left';
     const zoom = 70 / vfov;
     for (const o of chart.objects) {

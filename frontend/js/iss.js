@@ -2,6 +2,7 @@
 import { state, el, json, hhmm, num, saved, row, dayLabel, publish, cloudNote } from './core.js';
 import { drawMap as paintMap, trackLatLon } from './issmap.js';
 import { placeLabel } from './places.js';
+import { showPassOnSky } from './sky.js';
 import { ISS_KEY, pushActive, syncPush } from './push.js';
 
 const DIRECTIONS = ['P','KO','I','KA','E','LO','L','LU'];
@@ -41,6 +42,7 @@ function drawMap() {
     ? `${day(pass.visible_start)} ${hhmm(pass.visible_start)} · korkeimmillaan ${num(pass.max_alt)}° ${dir(pass.max_az)}`
     : `Asema nyt · ${where(station)}`;
   el('iss-map-meta').textContent=LEGEND[mode];
+  el('iss-sky-link').hidden=!onPass;
   el('iss-prev').disabled=!onPass||i<=0; el('iss-next').disabled=!onPass||i>=passes.length-1;
   for(const b of el('iss-map-box').querySelectorAll('[data-map-mode]')) {
     b.setAttribute('aria-pressed',String(b.dataset.mapMode===mode));
@@ -130,6 +132,7 @@ export function initIss() {
   el('iss-prev').addEventListener('click',()=>step(-1));
   el('iss-next').addEventListener('click',()=>step(1));
   el('iss-full').addEventListener('click',openFull);
+  el('iss-sky-link').addEventListener('click',()=>{closeFull(); showPassOnSky(selected);});
   el('iss-close').addEventListener('click',()=>closeFull());
   for(const b of el('iss-map-box').querySelectorAll('[data-map-mode]')) b.addEventListener('click',()=>setMode(b.dataset.mapMode));
   el('iss-zoom-in').addEventListener('click',()=>zoomTo(radius[mode]/1.5));

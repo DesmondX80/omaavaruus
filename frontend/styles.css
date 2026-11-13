@@ -200,6 +200,7 @@ body.sky-locked { overflow: hidden; }
 .iss-map-stage .sky-btn { min-height: 32px; background: rgba(5,7,15,.8); }
 .iss-map-stage .sky-btn:disabled { opacity: .4; cursor: default; }
 #iss-close { display: none; }
+#iss-sky-link { justify-self: start; }
 /* Koko näytössä kortista jää näkyviin vain kartta. */
 #iss.iss-full > :not(.iss-map-box) { display: none; }
 #iss.iss-full .iss-map-box { flex: 1; min-height: 0; display: flex; flex-direction: column; }

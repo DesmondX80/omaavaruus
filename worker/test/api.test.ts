@@ -370,6 +370,15 @@ describe("reitit", () => {
     expect(trackEnd).toBeGreaterThan(Date.parse(visible!.end) + 170_000);
     expect(track.points.every(([lat, lon]) => Math.abs(lat) <= 52 && Math.abs(lon) <= 180)).toBe(true);
     expect(passes.every((p) => (p.track === null) === (p.visible_start === null))).toBe(true);
+    // Taivaan rata alkaa ja päättyy 5° korkeudella, ja sen korkein kohta on ylilennon huippu.
+    const sky = visible!.sky_track!;
+    expect(sky[0][0]).toBe(0);
+    expect(sky[0][1]).toBeCloseTo(5, 0);
+    expect(sky.at(-1)![1]).toBeCloseTo(5, 0);
+    expect(sky.at(-1)![0]).toBeCloseTo((Date.parse(visible!.end) - Date.parse(visible!.start)) / 1000, -1);
+    expect(Math.max(...sky.map((p) => p[1]))).toBeCloseTo(visible!.max_alt, 0);
+    expect(sky.every((p, i) => i === 0 || p[0] > sky[i - 1][0])).toBe(true);
+    expect(passes.every((p) => (p.sky_track === null) === (p.visible_start === null))).toBe(true);
     // Oulussa asema jää matalalle etelätaivaalle.
     const oulu = findPasses(tle, 65.01, 25.47, new Date("2026-11-12T22:30:00Z"));
     expect(oulu.length).toBeGreaterThan(5);

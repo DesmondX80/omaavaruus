@@ -138,3 +138,24 @@ describe("Nyt-näkymän yhteenveto", async () => {
     expect(text(outlook({ weather: weather(null, hours(100)) }, now, hhmm))).toBe("Pilvistä koko yön");
   });
 });
+
+describe("ylilennon kaari taivaankartalla", async () => {
+  const { arcPoints } = await import("../../frontend/js/skychart.js");
+  // Nousu luoteesta, korkein kohta pohjoisessa ja lasku koillisessa: atsimuutti kulkee pohjoisen yli.
+  const pass = { start: "2026-11-16T16:50:00.000Z", sky_track: [[0, 5, 300], [60, 20, 350], [120, 25, 10], [180, 5, 60]] };
+  const t = (s) => Date.parse(pass.start) + s * 1000;
+
+  it("palauttaa koko radan ja rajatun osuuden", () => {
+    expect(arcPoints(pass)).toEqual([[5, 300], [20, 350], [25, 10], [5, 60]]);
+    const part = arcPoints(pass, t(30), t(90));
+    expect(part[0]).toEqual([12.5, 325]);
+    expect(part[1]).toEqual([20, 350]);
+    // Puolivälissä 350° ja 10° välillä on pohjoinen (0°), ei etelä (180°).
+    expect(part.at(-1)).toEqual([22.5, 0]);
+  });
+
+  it("rajaa välin radan kestoon", () => {
+    expect(arcPoints(pass, t(-60), t(400))).toEqual(arcPoints(pass));
+    expect(arcPoints(pass, t(200), t(300))).toEqual([]);
+  });
+});

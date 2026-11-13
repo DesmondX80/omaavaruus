@@ -169,6 +169,11 @@ export interface Pass {
   magnitude: number | null;
   /** Maanpäällinen reitti kartalle näkyvistä ylilennoista: pisteet [leveys, pituus] `step_s` sekunnin välein hetkestä `start`. */
   track: Track | null;
+  /**
+   * Rata havaitsijan taivaalla näkyvistä ylilennoista: [sekunteja ylilennon alusta, korkeus, atsimuutti] nousuhetkestä laskuun.
+   * Taivaankartta piirtää siitä kaaren.
+   */
+  sky_track: [number, number, number][] | null;
 }
 
 export interface Track {
@@ -213,7 +218,12 @@ export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days 
       let visibleStart: number | null = null, visibleEnd: number | null = null, brightest: number | null = null;
       let s = t;
       let state: State | null = cur;
+      // Taivaan rata kerätään samoista näytteistä; alku- ja loppupiste lisätään rajakorkeudelta.
+      const sky: [number, number, number][] = [];
+      const skyPoint = (time: number, st: State) => sky.push([Math.round((time - startTime) / 1000), round(st.alt, 1), round(st.az, 1)]);
+      skyPoint(startTime, tracker.state(startTime)!);
       while (state && state.alt >= MIN_ELEVATION) {
+        skyPoint(s, state);
         if (state.alt > best.alt) best = state;
         if (state.sunlit && sunAltitude(observer, s) <= MAX_SUN_ALT) {
           visibleStart ??= s;
@@ -225,6 +235,7 @@ export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days 
         state = tracker.state(s);
       }
       const endTime = tracker.crossing(s - 10_000, s, MIN_ELEVATION);
+      skyPoint(endTime, tracker.state(endTime)!);
       const iso = (time: number) => new Date(time).toISOString();
       passes.push({
         start: iso(startTime),
@@ -238,6 +249,7 @@ export function findPasses(tle: Tle, lat: number, lon: number, from: Date, days 
         visible_end: visibleEnd === null ? null : iso(visibleEnd),
         magnitude: brightest,
         track: visibleStart === null ? null : groundTrack(tracker, startTime - TRACK_MARGIN_MS, endTime + TRACK_MARGIN_MS, TRACK_STEP_S),
+        sky_track: visibleStart === null ? null : sky,
       });
       t = Math.ceil(s / STEP_MS) * STEP_MS;
       prev = tracker.state(t);

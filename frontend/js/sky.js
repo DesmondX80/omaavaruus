@@ -1,5 +1,5 @@
 // Taivaankarttakortti.
-import { state, el, json, fmt, hhmm, num, button, publish } from './core.js';
+import { state, el, json, fmt, hhmm, num, button, publish, store, dayLabel } from './core.js';
 import { placeLabel } from './places.js';
 import { drawSky, objectAt } from './skychart.js';
 import { createSkyView } from './skyview.js';
@@ -9,6 +9,37 @@ const DIRECTIONS = ['pohjoinen','koillinen','itä','kaakko','etelä','lounas','l
 const direction = az => DIRECTIONS[Math.round(az/45)%8];
 // Valittu kohde säilyy, kun kartta piirretään uudelleen (ajan siirto, minuutin välein tehtävä päivitys).
 let chart=null, selected=null, detailRequest=0, view=null, mode='map';
+// ISS-näkymästä taivaalle valitun ylilennon alkuhetki; ilman valintaa kartalla on seuraava näkyvä ylilento.
+let pinnedPass=null;
+/** Kuinka kaukana kartan hetkestä seuraava ylilento vielä piirretään (sama kuin aikaliu'un ulottuvuus). */
+const PASS_WINDOW=12*3600000;
+
+// Kartalle piirrettävä ylilento: valittu, tai seuraava kartan hetkestä alkaen näkyvä ylilento 12 tunnin sisällä.
+function issPass(at) {
+  const passes=(store.iss?.passes ?? []).filter(p=>p.sky_track);
+  return passes.find(p=>p.start===pinnedPass)
+    ?? passes.find(p=>Date.parse(p.visible_end)>=at && Date.parse(p.visible_start)<at+PASS_WINDOW) ?? null;
+}
+
+function showChart() {
+  chart.iss_pass=issPass(Date.parse(chart.at));
+  drawSky(el('sky-chart'),chart,selected); view?.setChart(chart,selected);
+  const p=chart.iss_pass;
+  el('sky-meta').textContent=[
+    `${placeLabel()} · ${state.lat.toFixed(2)}°, ${state.lon.toFixed(2)}° · ${chart.moon_phase_name}`,
+    p && `Keltainen kaari: ISS näkyy ${dayLabel(p.visible_start)} klo ${hhmm(p.visible_start)}–${hhmm(p.visible_end)}`,
+  ].filter(Boolean).join(' · ');
+}
+
+/** Näyttää ISS-ylilennon kaaren taivaankartalla. Jos ylilento on aikaliu'un ulottuvilla, kartta siirretään sen alkuun. */
+export function showPassOnSky(start) {
+  const pass=store.iss?.passes.find(p=>p.start===start); if(!pass) return;
+  pinnedPass=start;
+  const minutes=Math.round((Date.parse(pass.visible_start)-Date.now())/600000)*10;
+  if(Math.abs(minutes)<=720) {state.offset=minutes; el('time-offset').value=String(minutes);}
+  location.hash='#taivas';
+  sky();
+}
 
 const query = () => `lat=${state.lat}&lon=${state.lon}&at=${encodeURIComponent(new Date(Date.now()+state.offset*60000).toISOString())}`;
 
@@ -127,6 +158,12 @@ export function initSky() {
   el('sky-camera').addEventListener('click',toggleCamera);
   for(const b of el('sky-toolbar').querySelectorAll('[data-mode]')) b.addEventListener('click',()=>setMode(b.dataset.mode));
   window.addEventListener('popstate',()=>closeFull(true));
+  // Ylilennot haetaan erikseen: kaari piirretään, kun ne saapuvat. Valinta raukeaa, kun ylilento on ohi.
+  document.addEventListener('data',e=>{
+    if(e.detail!=='iss') return;
+    if(pinnedPass && !store.iss.passes.some(p=>p.start===pinnedPass)) pinnedPass=null;
+    if(chart) showChart();
+  });
   // Esc tai selaimen oma poistuminen koko näytöstä sulkee myös tilan.
   document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&isFull()) closeFull();});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&isFull()&&!document.fullscreenElement) closeFull();});
@@ -135,8 +172,7 @@ export function initSky() {
 export async function sky() {
   try {
     chart=await json(`/api/sky?${query()}`);
-    drawSky(el('sky-chart'),chart,selected); view?.setChart(chart,selected); el('time-label').textContent=fmt(chart.at);
-    el('sky-meta').textContent=`${placeLabel()} · ${state.lat.toFixed(2)}°, ${state.lon.toFixed(2)}° · ${chart.moon_phase_name}`;
+    showChart(); el('time-label').textContent=fmt(chart.at);
     el('object-list').replaceChildren(...chart.objects.filter(o=>o.alt>0&&o.kind!=='star').map(o=>button('',`${o.name} ${o.alt.toFixed(0)}°`,()=>select(o.name))));
     if(selected) loadDetail();
     // Kooste näyttää taivaan juuri nyt: aikaliu'ulla siirretty kartta ei kelpaa siihen.
