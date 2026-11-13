@@ -1,6 +1,7 @@
-// Avaruussääkortti: Kp, revontuliarvio, tuntiennuste, aurinkotuuli ja Kp-kaavio.
-import { state, el, json, hhmm, num } from './core.js';
-import { infoBtn, line } from './info.js';
+// Revontulet-näkymä: arvio nyt, tuntiennuste, arvioon vaikuttavat tekijät ja Kp-kaavio.
+import { state, el, json, hhmm, num, publish } from './core.js';
+import { infoBtn } from './info.js';
+import { placeLabel } from './places.js';
 
 const LEVELS=['Epätodennäköinen','Mahdollinen','Hyvä','Erittäin hyvä'];
 const KP_BIN=3*3600000, KP_DAYS=2;
@@ -57,6 +58,8 @@ function hourDetail(h) {
     h.limits.length?`rajoittaa: ${h.limits.join(', ')}`:null,
   ].filter(Boolean).join(' · ');
 }
+// Tunnin palkin luokka: arvion taso ja katkoviiva liian valoisille tunneille.
+export const hourClass = h => `hour l${h.chance==null?'x':LEVELS.indexOf(h.chance)}${h.light==='Valoisaa'?' day':''}`;
 // Tuntipalkin tunnit ja valinta. Tunnin voi valita liu'uttamalla sormea tai hiirtä palkilla, napauttamalla tai näppäimistöllä.
 let hours=[];
 function selectHour(i) {
@@ -84,7 +87,7 @@ function hourly(w) {
   el('hours').replaceChildren(...w.hourly.map(h=>{
     const btn=document.createElement('button'), bar=document.createElement('i'), label=document.createElement('small');
     const hour=new Date(h.time_tag).getHours();
-    btn.type='button'; btn.className=`hour l${h.chance==null?'x':LEVELS.indexOf(h.chance)}${h.light==='Valoisaa'?' day':''}`;
+    btn.type='button'; btn.className=hourClass(h);
     btn.setAttribute('aria-label',hourDetail(h)); btn.setAttribute('aria-pressed',String(h===selected));
     label.textContent=hour%3===0?String(hour).padStart(2,'0'):'';
     btn.append(bar,label);
@@ -93,31 +96,50 @@ function hourly(w) {
   // Näppäimistö: Enter tai välilyönti kohdistetulla tunnilla tuottaa click-tapahtuman.
   [...el('hours').children].forEach((btn,i)=>btn.addEventListener('click',()=>selectHour(i)));
 }
+// Arvion taso väriksi: hyvä vihreä, mahdollinen keltainen, muu neutraali.
+export const chanceTone = chance => ({'Hyvä':'good','Erittäin hyvä':'good','Mahdollinen':'mid'})[chance] ?? 'off';
+const pill = (text, tone) => {const s=document.createElement('span'); s.className=`level ${tone==='good'?'':tone}`; s.textContent=text; return s;};
+
+// Yksi arvioon vaikuttava tekijä: nimi ja arvo, tarkenne ja oikealla sen vaikutus arvioon.
+function factor(title, detail, level, info) {
+  const row=document.createElement('div'), b=document.createElement('b'), small=document.createElement('small');
+  row.className='factor'; b.append(title); if(info) b.append(' ',infoBtn(info));
+  small.textContent=detail; row.append(b,small); if(level) row.append(level);
+  return row;
+}
+
+function factors(w) {
+  const where=state.place?state.place.name:state.gps?`oma sijainti (±${Math.round(state.gps.accuracy)} m)`:'oletussijainti';
+  const cloud=w.cloud_cover_pct;
+  const bright=w.moon_alt>0&&w.moon_illumination>=0.5;
+  return [
+    w.ovation && factor('OVATION-malli', `Yläpuolella ${w.ovation.probability} %, lähistöllä ${w.ovation.nearby} %`, pill(w.aurora_chance_geomagnetic,chanceTone(w.aurora_chance_geomagnetic)), 'ovation'),
+    factor(`Kp-indeksi ${num(w.kp_now,1)}`, `${w.g_label} · pelkän Kp:n perusteella: ${w.aurora_chance_kp.toLowerCase()}`, pill(w.aurora_chance_kp,chanceTone(w.aurora_chance_kp)), 'kp'),
+    cloud==null
+      ? factor('Pilvisyys', 'Pilvisyystietoa ei saatu, joten arvio ei huomioi pilviä', pill('Ei tietoa','off'), 'clouds')
+      : factor(`Pilvisyys ${Math.round(cloud)} %`, `${w.cloud_label} · ${where} · ${w.cloud_provider}`, cloud>90?pill('Estää','bad'):cloud>30?pill('Heikentää','mid'):pill('Ei haittaa','good'), 'clouds'),
+    factor('Valoisuus', `${w.light} (Aurinko ${num(w.sun_alt)}°)`, w.light==='Valoisaa'?pill('Liian valoisaa','bad'):w.light==='Hämärää'?pill('Heikentää','mid'):pill('Pimeää','good'), 'light'),
+    factor(`Kuu ${Math.round(w.moon_illumination*100)} %`, w.moon_alt>0?'Horisontin yläpuolella':'Horisontin alapuolella', bright?pill('Himmentää','mid'):pill('Ei häiritse','good')),
+    factor(`Aurinkotuuli ${w.solar_wind_speed_kms ?? '–'} km/s`, `Bz ${w.bz_nt ?? '–'} nT`, w.bz_nt==null?null:w.bz_nt<0?pill('Bz etelään','good'):pill('Bz pohjoiseen','off'), 'bz'),
+  ].filter(Boolean);
+}
+
 export async function weather() {
   try {
     const w = await json(`/api/spaceweather?lat=${state.lat}&lon=${state.lon}`);
-    el('kp').textContent=w.kp_now.toFixed(1);
-    el('g-label').replaceChildren(w.g_label, ' ', infoBtn('g'));
-    el('aurora').textContent=`Revontuliarvio: ${w.aurora_chance}${w.aurora_limits.length?` – rajoittaa: ${w.aurora_limits.join(', ')}`:''}`;
-    const where=state.place?`paikassa ${state.place.name}`:state.gps?`sijainnissasi (±${Math.round(state.gps.accuracy)} m)`:'oletussijainnissa';
-    el('clouds').replaceChildren(...(w.cloud_cover_pct==null
-      ? [line('Pilvisyystietoa ei saatu – arvio perustuu vain Kp-indeksiin')]
-      : [
-          line(`Pilvisyys ${where}: ${w.cloud_label} (${Math.round(w.cloud_cover_pct)} %)`, infoBtn('clouds')),
-          line(`Lähde: ${w.cloud_provider}`),
-        ]),
-      ...(w.ovation
-        ? [line(`OVATION-malli: ${w.aurora_chance_geomagnetic} (yläpuolella ${w.ovation.probability} %, lähistöllä ${w.ovation.nearby} %)`, infoBtn('ovation'))]
-        : []),
-      line(`Kp yksin: ${w.aurora_chance_kp}`, infoBtn('kpOnly')),
-      line(`Valoisuus: ${w.light} (Aurinko ${num(w.sun_alt)}°)`, infoBtn('light')),
-      line(moonText(w)),
-    );
+    const now=document.createElement('b'); now.textContent=w.aurora_chance;
+    el('aurora').replaceChildren('Nyt: ',now);
+    el('aurora-verdict').className=`verdict ${chanceTone(w.aurora_chance)}`;
+    el('aurora-eyebrow').textContent=`Revontuliarvio · ${placeLabel()}${w.aurora_limits.length?` · rajoittaa: ${w.aurora_limits.join(', ')}`:''}`;
+    el('factors').replaceChildren(...factors(w));
     hourly(w);
-    el('wind').replaceChildren(
-      line(`Aurinkotuuli: ${w.solar_wind_speed_kms ?? '–'} km/s`, infoBtn('wind')),
-      line(`Bz: ${w.bz_nt ?? '–'} nT`, infoBtn('bz')),
-    );
     drawKp(el('kp-chart'),w);
-  } catch(e) {el('g-label').textContent=e.message;}
+    publish('weather',{...w, fetched:Date.now()});
+  } catch(e) {el('aurora').textContent=e.message;}
 }
+
+// Kaavion valinta: ovaali, Kp tai aurinkotuuli, yksi kerrallaan.
+el('aurora-seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  for(const x of el('aurora-seg').children) {x.setAttribute('aria-pressed',String(x===b)); el(`pane-${x.dataset.pane}`).hidden=x!==b;}
+});

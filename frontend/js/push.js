@@ -26,6 +26,8 @@ export function renderPush() {
     ? 'Tämä selain ei tue ilmoituksia. iPhonessa ilmoitukset toimivat, kun sovellus on lisätty Koti-valikkoon.'
     : s ? `Ilmoitukset ovat päällä: ${s.place}.`
     : 'Saat ilmoituksen puhelimeen, kun revontulia voi näkyä valitussa paikassa.');
+  el('notify-dot').hidden = !s;
+  el('aurora-notify-status').textContent = s ? `Päällä: kun arvio on vähintään ${s.threshold} · ${s.place}` : supported ? 'Pois päältä' : 'Ei tuettu tässä selaimessa';
   // Laukaisukortti näyttää, voiko laukaisuilmoitukset valita.
   document.dispatchEvent(new Event('pushchange'));
 }
@@ -62,6 +64,8 @@ async function save(keepPlace = false) {
 }
 
 export const pushActive = () => !!(subscription && settings());
+// Voimassa olevan tilauksen paikka ja raja; null, kun ilmoitukset eivät ole päällä.
+export const pushSettings = () => pushActive() ? settings() : null;
 // Vie muuttuneet laukaisu- tai ISS-asetukset palvelimelle, jos ilmoitukset ovat käytössä.
 export function syncPush() { if (pushActive()) run(() => save(true)); }
 

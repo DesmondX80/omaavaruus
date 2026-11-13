@@ -20,6 +20,11 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 
 ## Ominaisuudet
 
+Käyttöliittymässä on viisi näkymää (puhelimessa alapalkissa, leveällä näytöllä vasemmassa reunassa): **Nyt** kokoaa illan
+revontuliarvion, lähimmät tapahtumat ja taivaan tilanteen, ja **Revontulet**, **Taivas**, **ISS** ja **Kalenteri** näyttävät
+yksityiskohdat. Paikan valinta ja kaikki ilmoitusasetukset avautuvat yläpalkista. Näkymän voi avata suoraan osoitteella
+(`#nyt`, `#revontulet`, `#taivas`, `#iss`, `#kalenteri`).
+
 - **Avaruussää**: Kp-indeksi (NOAA SWPC) pylväskaaviona kahden vuorokauden havainnoista ja ennusteesta, G-asteikko, aurinkotuulen nopeus ja Bz.
 - **Revontuliarvio**: NOAA:n OVATION Prime -malli (todennäköisyys paikan yläpuolella ja 500 km säteellä) lähimmälle tunnille, sen jälkeen Kp-ennuste ja leveysaste. Arviosta vähennetään pilvisyys (FMI, varalla Open-Meteo), taivaan valoisuus (Auringon korkeus) ja kuutamo. Tuntiennuste seuraaville 24 tunnille ja paras havaintoikkuna.
 - **Revontuliovaali ja aurinkotuuli**: OVATION-mallin ennuste napakarttana (mantereiden ääriviivat Natural Earth 110m) ja aurinkotuulen nopeus, tiheys ja Bz vuorokauden ajalta (NOAA SWPC:n reaaliaikamittaukset, DSCOVR/ACE/IMAP).
@@ -29,7 +34,7 @@ Kaikki `make`-komennot ajetaan repon juuresta; ne käyttävät `worker/`-hakemis
 - **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki.
 - **Asennettava (PWA)**: sovelluksen voi lisätä puhelimen kotinäytölle. Service worker pitää sovelluksen ja viimeksi haetut tiedot saatavilla ilman verkkoa ja kertoo, milloin näytettävät tiedot on haettu.
 - **Revontuli-ilmoitukset**: push-ilmoitus puhelimeen, kun revontuliarvio valitussa paikassa on vähintään käyttäjän valitsemalla rajalla. Worker tarkistaa tilanteen 15 minuutin välein (Cron Trigger) ja säilyttää tilaukset Workers KV:ssä.
-- **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta sekä linkki laukaisun sivulle, josta löytyy suoratoisto. Suosikkitoimijat (tallennetaan selaimeen) korostetaan, listan voi rajata niihin ja niiden laukaisuista voi saada push-ilmoituksen noin tuntia ennen.
+- **Laukaisut**: RocketLaunch.Live, seuraavat laukaisut ja lähtölaskenta sekä linkki laukaisun sivulle, josta löytyy suoratoisto. Laukaisut näkyvät kalenterissa taivaan tapahtumien kanssa samalla aikajanalla. Suosikkitoimijat (tallennetaan selaimeen) merkitään tähdellä, kalenterin voi rajata niihin ja niiden laukaisuista voi saada push-ilmoituksen noin tuntia ennen.
 
 ## Rakenne
 
@@ -57,8 +62,12 @@ frontend/
   sw.js              # service worker: verkko ensin, ilman verkkoa välimuisti
   js/                # ES-moduulit ilman käännösvaihetta
     main.js          # käynnistys ja ajastukset
-    core.js          # jaettu tila, API-kutsut, apufunktiot
-    weather.js, solarwind.js, land.js, sky.js, skychart.js, skyview.js, iss.js, issmap.js, events.js, places.js, push.js, launches.js, info.js
+    core.js          # jaettu tila, API-kutsut, haettujen tietojen välitys näkymille, apufunktiot
+    nav.js           # näkymien vaihto osoitteen #-osan mukaan
+    sheets.js        # alhaalta nouseva paneeli: paikka, ilmoitukset, selitykset
+    now.js           # Nyt-kooste muiden näkymien tiedoista
+    calendar.js      # taivaan tapahtumat ja laukaisut samalla aikajanalla
+    weather.js, solarwind.js, land.js, sky.js, skychart.js, skyview.js, iss.js, issmap.js, events.js, launches.js, places.js, push.js, info.js
 ```
 
 ## Julkaisu

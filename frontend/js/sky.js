@@ -1,5 +1,5 @@
 // Taivaankarttakortti.
-import { state, el, json, fmt, hhmm, num, button } from './core.js';
+import { state, el, json, fmt, hhmm, num, button, publish } from './core.js';
 import { placeLabel } from './places.js';
 import { drawSky, objectAt } from './skychart.js';
 import { createSkyView } from './skyview.js';
@@ -52,7 +52,7 @@ async function loadDetail() {
   }
 }
 
-function select(name) {
+export function select(name) {
   selected=name;
   if(chart) {drawSky(el('sky-chart'),chart,selected); view?.setChart(chart,selected);}
   loadDetail();
@@ -139,5 +139,7 @@ export async function sky() {
     el('sky-meta').textContent=`${placeLabel()} · ${state.lat.toFixed(2)}°, ${state.lon.toFixed(2)}° · ${chart.moon_phase_name}`;
     el('object-list').replaceChildren(...chart.objects.filter(o=>o.alt>0&&o.kind!=='star').map(o=>button('',`${o.name} ${o.alt.toFixed(0)}°`,()=>select(o.name))));
     if(selected) loadDetail();
+    // Kooste näyttää taivaan juuri nyt: aikaliu'ulla siirretty kartta ei kelpaa siihen.
+    if(state.offset===0) publish('sky',chart);
   } catch(e) {el('sky-meta').textContent=e.message;}
 }

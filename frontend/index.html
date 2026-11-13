@@ -12,69 +12,94 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <h1>OmaAvaruus</h1>
-    <p class="sub">Avaruussää · taivaankartta · laukaisut</p>
-    <div id="clock" class="clock"></div>
-    <div id="offline" class="offline" role="status" hidden></div>
-    <div class="place">
-      <span id="place-name" class="place-name"></span>
-      <button type="button" id="place-toggle" class="link-btn" aria-expanded="false" aria-controls="place-panel">Vaihda paikka</button>
-      <div id="place-panel" class="place-panel" hidden>
-        <ul id="place-list" class="place-list"></ul>
-        <form id="place-search" class="place-search">
-          <input type="search" id="place-query" placeholder="Kirjoita paikan nimi, esim. Rovaniemi" autocomplete="off" aria-label="Hae paikkaa nimellä" minlength="2" maxlength="80" required />
-          <button type="submit">Hae</button>
-        </form>
-        <div id="place-status" class="muted" role="status"></div>
-        <ul id="place-results" class="place-list"></ul>
-      </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-now" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></symbol>
+    <symbol id="i-aurora" viewBox="0 0 24 24"><path d="M3 15c3-7 5 4 8-2s5 4 10-5M3 20c3-5 5 2 8-1s5 3 10-4"/></symbol>
+    <symbol id="i-sky" viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6-5.3-3-5.3 3 1.2-6L3.4 9.3l6-.7z"/></symbol>
+    <symbol id="i-iss" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="10" ry="4.5" transform="rotate(-30 12 12)"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0112 0v5l2 2H4zM10 21a2 2 0 004 0"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 10-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 3c3 2 5 6 5 10l-2 3H9l-2-3c0-4 2-8 5-10zM9 19l3 2 3-2"/><circle cx="12" cy="10" r="1.6"/></symbol>
+    <symbol id="i-meteor" viewBox="0 0 24 24"><path d="M4 4l8.5 8.5M10 4l4.5 4.5M4 10l4.5 4.5"/><circle cx="16.5" cy="16.5" r="3.5"/></symbol>
+    <symbol id="i-planet" viewBox="0 0 24 24"><circle cx="9" cy="14" r="5"/><circle cx="18" cy="7" r="2.5"/></symbol>
+    <symbol id="i-eclipse" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 000 16 10 10 0 010-16z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  </svg>
+
+  <header class="top">
+    <div class="top-in">
+      <div class="brand">OmaAvaruus</div>
+      <button type="button" id="place-toggle" class="chip-btn" aria-haspopup="dialog" aria-label="Vaihda paikka"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg><span id="place-name"></span></button>
+      <button type="button" id="notify-toggle" class="icon-btn" aria-haspopup="dialog" aria-label="Ilmoitukset" data-sheet="notify"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg><span id="notify-dot" class="on" hidden></span></button>
     </div>
+    <div id="offline" class="offline" role="status" hidden></div>
   </header>
 
+  <nav class="nav" id="nav" aria-label="Näkymät">
+    <a href="#nyt"><svg class="ic" aria-hidden="true"><use href="#i-now"/></svg>Nyt</a>
+    <a href="#revontulet"><svg class="ic" aria-hidden="true"><use href="#i-aurora"/></svg>Revontulet</a>
+    <a href="#taivas"><svg class="ic" aria-hidden="true"><use href="#i-sky"/></svg>Taivas</a>
+    <a href="#iss"><svg class="ic" aria-hidden="true"><use href="#i-iss"/></svg>ISS</a>
+    <a href="#kalenteri"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg>Kalenteri</a>
+  </nav>
+
   <main>
-    <section class="card" id="weather">
-      <h2>Avaruussää</h2>
-      <div class="kp-row info-host">
-        <div class="kp-badge"><span id="kp">–</span><small data-info-slot="kp">Kp nyt</small></div>
-        <div>
-          <div id="g-label" class="g-label">Ladataan…</div>
-          <div id="aurora" class="aurora">Revontulimahdollisuus: –</div>
+    <section class="view" id="view-nyt" aria-label="Nyt">
+      <div class="verdict" id="now-verdict">
+        <div class="eyebrow" id="now-eyebrow">Seuraavat 24 h</div>
+        <h1 id="now-title">Ladataan…</h1>
+        <div class="muted" id="now-sub"></div>
+        <div class="hours mini" id="now-hours" aria-hidden="true"></div>
+        <div class="stats" id="now-stats"></div>
+        <a class="link" href="#revontulet">Näytä ennuste ja perustelut ›</a>
+      </div>
+      <div class="cols">
+        <div class="panel">
+          <div class="head"><h2>Seuraavaksi</h2><a class="link" href="#kalenteri">Koko kalenteri ›</a></div>
+          <div class="rows" id="now-next"><div class="muted">Ladataan…</div></div>
+        </div>
+        <div class="panel">
+          <div class="head"><h2>Taivaalla nyt</h2><a class="link" href="#taivas">Taivaankartta ›</a></div>
+          <div class="chips" id="now-sky"></div>
+          <div class="muted" id="now-light"></div>
+          <div class="head"><h2>ISS nyt</h2><a class="link" href="#iss">Kartta ›</a></div>
+          <div class="muted" id="now-iss">Ladataan…</div>
         </div>
       </div>
-      <div id="clouds" class="muted"></div>
-      <div id="wind" class="muted"></div>
-      <div id="hourly" class="hourly" hidden>
-        <h3 class="info-host" data-info-slot="hourly">Seuraavat 24 h</h3>
-        <div id="best-window" class="best-window"></div>
-        <div id="hours" class="hours"></div>
-        <div id="hour-detail" class="muted"></div>
-      </div>
-      <div class="push">
-        <h3 class="info-host" data-info-slot="push">Revontuli-ilmoitukset</h3>
-        <div id="push-status" class="muted" role="status"></div>
-        <div id="push-controls" class="push-controls" hidden>
-          <label>Ilmoita, kun arvio on vähintään
-            <select id="push-threshold">
-              <option>Mahdollinen</option>
-              <option selected>Hyvä</option>
-              <option>Erittäin hyvä</option>
-            </select>
-          </label>
-          <button type="button" id="push-enable">Ota ilmoitukset käyttöön</button>
-          <button type="button" id="push-move" hidden></button>
-          <button type="button" id="push-test" hidden>Lähetä testi-ilmoitus</button>
-          <button type="button" id="push-disable" hidden>Poista käytöstä</button>
-        </div>
-      </div>
-      <h3 class="kp-title info-host" data-info-slot="kpChart">Kp-indeksi: 2 vrk havaittu, 2 vrk ennuste</h3>
-      <svg id="kp-chart" viewBox="0 0 320 140" role="img" aria-label="Kp-indeksi kolmen tunnin jaksoissa: havaitut ja ennustetut arvot"></svg>
     </section>
 
-    <section class="card" id="solarwind">
-      <h2 class="info-host" data-info-slot="oval">Revontuliovaali ja aurinkotuuli</h2>
-      <canvas id="ovation-map" class="ovation-map" width="320" height="320" role="img" aria-label="Revontuliovaali napakarttana"></canvas>
-      <div id="ovation-meta" class="muted">Ladataan…</div>
+    <section class="view" id="view-revontulet" aria-label="Revontulet" hidden>
+      <div class="verdict" id="aurora-verdict">
+        <div class="eyebrow" id="aurora-eyebrow">Revontuliarvio</div>
+        <h1 id="aurora">Ladataan…</h1>
+        <div id="hourly" class="hourly" hidden>
+          <div class="info-host"><span id="best-window" class="best-window"></span> <span data-info-slot="hourly"></span></div>
+          <div id="hours" class="hours"></div>
+          <div id="hour-detail" class="muted"></div>
+        </div>
+      </div>
+      <div class="cols">
+        <div class="panel">
+          <div class="head"><h2>Mistä arvio syntyy</h2></div>
+          <div id="factors"></div>
+        </div>
+        <div class="panel">
+          <div class="seg" id="aurora-seg" role="group" aria-label="Kaavio">
+            <button type="button" data-pane="oval" aria-pressed="true">Ovaali</button>
+            <button type="button" data-pane="kp" aria-pressed="false">Kp 4 vrk</button>
+            <button type="button" data-pane="wind" aria-pressed="false">Aurinkotuuli</button>
+          </div>
+          <div id="pane-oval" class="pane">
+            <div class="head"><h2 data-info-slot="oval">Revontuliovaali</h2></div>
+            <canvas id="ovation-map" class="ovation-map" width="320" height="320" role="img" aria-label="Revontuliovaali napakarttana"></canvas>
+            <div id="ovation-meta" class="muted">Ladataan…</div>
+          </div>
+          <div id="pane-kp" class="pane" hidden>
+            <div class="head"><h2 data-info-slot="kpChart">Kp-indeksi: 2 vrk havaittu, 2 vrk ennuste</h2></div>
+            <svg id="kp-chart" viewBox="0 0 320 140" role="img" aria-label="Kp-indeksi kolmen tunnin jaksoissa: havaitut ja ennustetut arvot"></svg>
+          </div>
+          <div id="pane-wind" class="pane" hidden>
       <div class="wind-charts">
         <h3 class="info-host" data-info-slot="wind">Nopeus <span id="wind-speed-now" class="wind-now"></span></h3>
         <svg id="wind-speed" viewBox="0 0 320 70" role="img" aria-label="Aurinkotuulen nopeus vuorokauden ajalta"></svg>
@@ -84,10 +109,15 @@
         <svg id="wind-bz" viewBox="0 0 320 70" role="img" aria-label="Magneettikentän Bz-komponentti vuorokauden ajalta"></svg>
       </div>
       <div id="wind-meta" class="muted"></div>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="row panel action-row" data-sheet="notify"><span class="badge"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg></span><span><b>Revontuli-ilmoitukset</b><small id="aurora-notify-status"></small></span><span class="when">Muuta ›</span></button>
     </section>
 
-    <section class="card" id="sky">
-      <h2 class="info-host" data-info-slot="sky">Taivaankartta</h2>
+    <section class="view" id="view-taivas" aria-label="Taivas" hidden>
+      <div class="panel" id="sky">
+        <h2 class="info-host" data-info-slot="sky">Taivaankartta</h2>
       <div class="sky-controls">
         <label>Aika <input type="range" id="time-offset" min="-720" max="720" step="10" value="0" /></label>
         <span id="time-label" class="muted"></span>
@@ -112,11 +142,14 @@
       <div id="sky-detail" class="sky-detail" aria-live="polite" hidden></div>
       <div id="sky-meta" class="muted"></div>
       <div id="object-list" class="objects"></div>
+      </div>
     </section>
 
-    <section class="card" id="iss">
-      <h2 class="info-host" data-info-slot="iss">ISS-ylilennot</h2>
-      <div id="iss-now">Ladataan…</div>
+    <section class="view" id="view-iss" aria-label="ISS" hidden>
+      <div class="cols">
+        <div class="panel" id="iss">
+          <h2 class="info-host" data-info-slot="iss">Avaruusasema</h2>
+          <div id="iss-now">Ladataan…</div>
       <div id="iss-map-box" class="iss-map-box" hidden>
         <div class="iss-map-bar">
           <button type="button" id="iss-prev" class="sky-btn" aria-label="Edellinen ylilento">‹</button>
@@ -138,25 +171,74 @@
         </div>
         <div id="iss-map-meta" class="muted"></div>
       </div>
-      <ol id="iss-passes" class="event-list"></ol>
-      <div id="iss-notify" class="favorite-options"></div>
-      <div id="iss-meta" class="muted"></div>
+        </div>
+        <div class="panel">
+          <div class="head"><h2>Näkyvät ylilennot</h2><button type="button" class="link" data-sheet="notify">Ilmoitukset ›</button></div>
+          <ol id="iss-passes" class="rows"></ol>
+          <div id="iss-meta" class="muted"></div>
+        </div>
+      </div>
     </section>
 
-    <section class="card" id="events">
-      <h2 class="info-host" data-info-slot="events">Taivaan tapahtumat</h2>
-      <div id="events-meta" class="muted">Ladataan…</div>
-      <ol id="event-list" class="event-list"></ol>
-      <div id="events-more"></div>
-    </section>
-
-    <section class="card" id="launches">
-      <h2 class="info-host" data-info-slot="launch">Laukaisut <span class="live">PÄIVITTYVÄ</span></h2>
-      <div id="next-launch" class="next-launch">Ladataan…</div>
-      <div id="launch-favorites" class="favorites"></div>
-      <ol id="launch-list" class="launch-list"></ol>
+    <section class="view" id="view-kalenteri" aria-label="Kalenteri" hidden>
+      <div class="chips" id="cal-filter" role="group" aria-label="Rajaa kalenteria">
+        <button type="button" class="chip" data-filter="all" aria-pressed="true">Kaikki</button>
+        <button type="button" class="chip" data-filter="sky" aria-pressed="false">Taivaan tapahtumat</button>
+        <button type="button" class="chip" data-filter="launch" aria-pressed="false">Laukaisut</button>
+        <button type="button" class="chip" data-filter="fav" aria-pressed="false">★ Suosikit</button>
+      </div>
+      <div class="panel">
+        <div class="head"><h2 data-info-slot="events">Tapahtumat ja laukaisut</h2><span data-info-slot="launch"></span></div>
+        <div id="cal-list"><div class="muted">Ladataan…</div></div>
+        <div id="cal-more"></div>
+        <div id="cal-meta" class="muted"></div>
+      </div>
     </section>
   </main>
+
+  <div id="scrim" class="scrim" hidden>
+    <div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="head"><h3 id="sheet-title"></h3><button type="button" id="sheet-close" class="icon-btn" aria-label="Sulje"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div id="sheet-place" class="sheet-body" hidden>
+        <ul id="place-list" class="place-list"></ul>
+        <form id="place-search" class="place-search">
+          <input type="search" id="place-query" placeholder="Hae paikkaa, esim. Rovaniemi" autocomplete="off" aria-label="Hae paikkaa nimellä" minlength="2" maxlength="80" required />
+          <button type="submit">Hae</button>
+        </form>
+        <div id="place-status" class="muted" role="status"></div>
+        <ul id="place-results" class="place-list"></ul>
+        <div class="muted">Paikan vaihto päivittää revontuliarvion, taivaankartan, ylilennot ja tapahtumien näkyvyyden.</div>
+      </div>
+      <div id="sheet-notify" class="sheet-body" hidden>
+        <div class="notify-group">
+          <h4 class="info-host" data-info-slot="push">Revontulet</h4>
+          <div id="push-status" class="muted" role="status"></div>
+        <div id="push-controls" class="push-controls" hidden>
+          <label>Ilmoita, kun arvio on vähintään
+            <select id="push-threshold">
+              <option>Mahdollinen</option>
+              <option selected>Hyvä</option>
+              <option>Erittäin hyvä</option>
+            </select>
+          </label>
+          <button type="button" id="push-enable">Ota ilmoitukset käyttöön</button>
+          <button type="button" id="push-move" hidden></button>
+          <button type="button" id="push-test" hidden>Lähetä testi-ilmoitus</button>
+          <button type="button" id="push-disable" hidden>Poista käytöstä</button>
+        </div>
+        </div>
+        <div class="notify-group">
+          <h4>ISS-ylilennot</h4>
+          <div id="iss-notify" class="favorite-options"></div>
+        </div>
+        <div class="notify-group">
+          <h4>Laukaisut</h4>
+          <div id="launch-favorites" class="favorites"></div>
+        </div>
+      </div>
+      <div id="sheet-info" class="sheet-body" hidden></div>
+    </div>
+  </div>
 
   <script src="config.js"></script>
   <script type="module" src="js/main.js"></script>

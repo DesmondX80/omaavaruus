@@ -1,18 +1,21 @@
-// Käynnistys: kytkee kortit yhteen ja ajastaa päivitykset.
+// Käynnistys: kytkee näkymät yhteen ja ajastaa päivitykset.
 import { state, el } from './core.js';
+import { initCalendar, tickCountdowns } from './calendar.js';
 import { events } from './events.js';
 import { initInfo } from './info.js';
 import { iss, initIss } from './iss.js';
-import { launches, renderLaunches } from './launches.js';
+import { launches } from './launches.js';
+import { initNav } from './nav.js';
+import { initNow } from './now.js';
 import { initPlaces } from './places.js';
 import { initPush, renderPush } from './push.js';
+import { initSheets } from './sheets.js';
 import { initSky, sky } from './sky.js';
 import { redrawMap, solarwind } from './solarwind.js';
 import { weather } from './weather.js';
 
-function clock() {el('clock').textContent=new Date().toLocaleString('fi-FI'); renderLaunches();}
-
-initInfo(); initSky(); initIss(); clock(); setInterval(clock,1000);
+initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initIss(); initNav();
+setInterval(tickCountdowns,1000);
 el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
 launches();
 initPush();

@@ -1,11 +1,11 @@
 // ISS-kortti: aseman sijainti ja rata kartalla, näkyvät ylilennot reitteineen sekä ilmoitusvalinta.
-import { state, el, json, hhmm, num, saved, button } from './core.js';
+import { state, el, json, hhmm, num, saved, row, dayLabel, publish } from './core.js';
 import { drawMap as paintMap, trackLatLon } from './issmap.js';
 import { placeLabel } from './places.js';
 import { ISS_KEY, pushActive, syncPush } from './push.js';
 
 const DIRECTIONS = ['P','KO','I','KA','E','LO','L','LU'];
-const dir = az => DIRECTIONS[Math.round(az/45)%8];
+export const dir = az => DIRECTIONS[Math.round(az/45)%8];
 const day = t => new Date(t).toLocaleDateString('fi-FI',{weekday:'short',day:'numeric',month:'numeric'});
 const where = p => `${num(Math.abs(p.lat),1)}°${p.lat>=0?'P':'E'}, ${num(Math.abs(p.lon),1)}°${p.lon>=0?'I':'L'}`;
 // Kartalla näytettävä ylilento (alkuhetki tunnisteena) säilyy, kun tiedot päivittyvät minuutin välein.
@@ -142,6 +142,8 @@ export function initIss() {
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&isFull()&&!document.fullscreenElement) closeFull();});
   // Kartta piirretään näkyvän kokonsa mukaan, joten ikkunan koon muutos vaatii uuden piirron.
   window.addEventListener('resize',drawMap);
+  // Piilossa olleen näkymän kartta piirretään, kun näkymä avataan.
+  document.addEventListener('viewchange',drawMap);
   // Asema liikkuu noin 7 km sekunnissa: kartta piirretään uudelleen parin sekunnin välein, kun sivu on näkyvissä.
   setInterval(()=>{if(!document.hidden) drawMap();},2000);
 }
@@ -152,34 +154,39 @@ function renderNotify() {
   input.addEventListener('change',()=>{saved.set(ISS_KEY,{notify:input.checked}); syncPush();});
   label.append(input,' Ilmoita näkyvistä ylilennoista noin 5–20 min ennen');
   const parts=[label];
-  if(!pushActive()) {const hint=document.createElement('small'); hint.textContent='Vaatii, että ilmoitukset on otettu käyttöön Avaruussää-kortista. Ilmoitus koskee ilmoitusten paikkaa.'; parts.push(hint);}
+  const hint=document.createElement('small'); hint.textContent=pushActive() ? 'Ilmoitus koskee ilmoitusten paikkaa.' : 'Ota ensin ilmoitukset käyttöön yllä.'; parts.push(hint);
   el('iss-notify').replaceChildren(...parts);
 }
 
-function render() {
+/** Aseman tilanne lauseena: taivaalla (korkeus ja suunta) tai minkä kohdan yllä se on. */
+export function issNowText() {
+  if(!data) return '';
   const p=data.position;
-  el('iss-now').textContent = p.alt>0
+  return p.alt>0
     ? `Asema on nyt taivaalla: korkeus ${num(p.alt)}°, suunta ${dir(p.az)} · ${p.sunlit?'auringonvalossa':'Maan varjossa'}`
     : `Asema on nyt kohdan ${where(p)} yllä ${num(p.height_km)} km korkeudella, ${num(p.range_km)} km päässä.`;
+}
+
+function render() {
+  el('iss-now').textContent=issNowText();
   const visible=visiblePasses();
   if(!visible.some(x=>x.start===selected)) selected=visible[0]?.start ?? null;
   el('iss-passes').replaceChildren(...(visible.length ? visible.map(x=>{
-    const li=document.createElement('li'), when=document.createElement('span'), body=document.createElement('span');
-    const pick=button('pass-pick','',()=>select(x.start,true));
-    pick.dataset.start=x.start; pick.setAttribute('aria-pressed',String(x.start===selected));
-    when.className='event-day'; when.textContent=`${day(x.visible_start)} ${hhmm(x.visible_start)}`;
-    const b=document.createElement('b'); b.textContent=`Korkeimmillaan ${num(x.max_alt)}° ${dir(x.max_az)}${x.max_alt<10?' · matala':''}`;
-    const s=document.createElement('small');
+    const li=document.createElement('li');
     const span=hhmm(x.visible_start)===hhmm(x.visible_end) ? `hetken klo ${hhmm(x.visible_start)}` : `${hhmm(x.visible_start)}–${hhmm(x.visible_end)}`;
-    s.textContent=`Näkyy ${span} · nousee ${dir(x.start_az)}, laskee ${dir(x.end_az)}${x.magnitude===null?'':` · kirkkaus noin ${num(x.magnitude,1)} mag`}`;
-    body.append(b,s); pick.append(when,body); li.append(pick); return li;
-  }) : [Object.assign(document.createElement('li'),{textContent:`Ei näkyviä ylilentoja viiteen vuorokauteen (ylilentoja yhteensä ${data.passes.length}, mutta asema on silloin Maan varjossa tai taivas on liian valoisa).`})]));
+    const pick=row({tag:'button', iconName:'iss', title:`Korkeimmillaan ${num(x.max_alt)}° ${dir(x.max_az)}${x.max_alt<10?' · matala':''}`,
+      details:[`Näkyy ${span} · nousee ${dir(x.start_az)}, laskee ${dir(x.end_az)}${x.magnitude===null?'':` · kirkkaus noin ${num(x.magnitude,1)} mag`}`],
+      when:dayLabel(x.visible_start), whenSub:`klo ${hhmm(x.visible_start)}`});
+    pick.classList.add('pass-pick'); pick.dataset.start=x.start; pick.setAttribute('aria-pressed',String(x.start===selected));
+    pick.addEventListener('click',()=>select(x.start,true));
+    li.append(pick); return li;
+  }) : [Object.assign(document.createElement('li'),{className:'muted',textContent:`Ei näkyviä ylilentoja viiteen vuorokauteen (ylilentoja yhteensä ${data.passes.length}, mutta asema on silloin Maan varjossa tai taivas on liian valoisa).`})]));
   el('iss-meta').textContent=`Ratatiedot CelesTrak, epookki ${day(data.tle_epoch)} ${hhmm(data.tle_epoch)}. Ylilento alkaa ja päättyy 5° korkeudella.`;
   drawMap();
 }
 
 export async function iss() {
-  try {data=await json(`/api/iss?lat=${state.lat}&lon=${state.lon}`); render();}
+  try {data=await json(`/api/iss?lat=${state.lat}&lon=${state.lon}`); render(); publish('iss',data);}
   catch(e) {el('iss-meta').textContent=e.message;}
   renderNotify();
 }

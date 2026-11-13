@@ -33,3 +33,32 @@ export function button(className, text, onClick) {
   const b=document.createElement('button'); b.type='button'; b.className=className; b.textContent=text;
   b.addEventListener('click',onClick); return b;
 }
+
+// Viimeksi haetut tiedot kortteja yhdistäville näkymille (Nyt-kooste, kalenteri). Hakija julkaisee tiedot avaimella,
+// ja kuuntelijat saavat data-tapahtuman, jonka detail on avain.
+export const store = {};
+export function publish(key, value) { store[key]=value; document.dispatchEvent(new CustomEvent('data',{detail:key})); }
+
+// Kuvake index.html:n symboleista (i-iss, i-rocket, …).
+export function icon(name) {
+  const SVG='http://www.w3.org/2000/svg', svg=document.createElementNS(SVG,'svg'), use=document.createElementNS(SVG,'use');
+  svg.setAttribute('class','ic'); svg.setAttribute('aria-hidden','true'); use.setAttribute('href',`#i-${name}`); svg.append(use);
+  return svg;
+}
+// Listarivi: kuvake, otsikko ja tarkenteet, oikealla ajankohta. tag on 'div', 'a' (href) tai 'button'.
+// details ja when voivat olla tekstiä tai valmiita elementtejä; whenSub on ajankohdan alle tuleva pieni rivi.
+export function row({tag='div', href, kind='', iconName, title, details=[], when='', whenSub='', dim=false}) {
+  const node=document.createElement(tag), badge=document.createElement('span'), body=document.createElement('span'), time=document.createElement('span');
+  node.className=`row${dim?' dim':''}`; if(tag==='button') node.type='button'; if(href) node.href=href;
+  badge.className=`badge ${kind}`; badge.append(icon(iconName));
+  const b=document.createElement('b'); b.append(...[title].flat()); body.append(b);
+  for(const d of details.filter(Boolean)) {
+    if(d instanceof Element && d.tagName==='SMALL') {body.append(d); continue;}
+    const small=document.createElement('small'); small.append(...[d].flat()); body.append(small);
+  }
+  time.className='when'; time.append(...[when].flat());
+  if(whenSub) {const small=document.createElement('small'); small.append(...[whenSub].flat()); time.append(small);}
+  node.append(badge,body,time);
+  return node;
+}
+export const dayLabel = t => new Date(t).toLocaleDateString('fi-FI',{weekday:'short',day:'numeric',month:'numeric'});

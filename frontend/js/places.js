@@ -1,5 +1,6 @@
 // Paikan valinta: oma sijainti (GPS) tai nimellä haettu paikka.
 import { state, el, json, saved, button } from './core.js';
+import { closeSheet, openSheet } from './sheets.js';
 
 // Kutsutaan, kun havaintopaikka vaihtuu ja paikasta riippuvat tiedot pitää hakea uudelleen.
 let onChange = () => {};
@@ -8,7 +9,7 @@ const validPlace = p => p && typeof p.name==='string' && p.name && Number.isFini
 const samePlace = (a,b) => a.name===b.name && Math.abs(a.lat-b.lat)<0.01 && Math.abs(a.lon-b.lon)<0.01;
 export const placeLabel = () => state.place ? state.place.name : state.gps ? 'Oma sijainti' : `${state.fallback.name} (oletus)`;
 function renderPlaces() {
-  el('place-name').textContent=`Paikka: ${placeLabel()}`;
+  el('place-name').textContent=placeLabel();
   const item = (label, current, onPick, onRemove) => {
     const li=document.createElement('li'), pick=button('pick',label,onPick);
     pick.setAttribute('aria-current',String(current)); li.append(pick);
@@ -28,7 +29,7 @@ function applyPlace() {
 }
 function selectPlace(place) {
   state.place=place; saved.set('omaavaruus.selected', place?state.places.indexOf(place):null);
-  togglePanel(false); applyPlace();
+  closeSheet(); applyPlace();
 }
 function removePlace(place) {
   const selected=state.place===place;
@@ -36,11 +37,8 @@ function removePlace(place) {
   if(selected) selectPlace(null);
   else {saved.set('omaavaruus.selected', state.place?state.places.indexOf(state.place):null); renderPlaces();}
 }
-function togglePanel(open) {
-  el('place-panel').hidden=!open; el('place-toggle').setAttribute('aria-expanded',String(open));
-  el('place-toggle').textContent=open?'Sulje':'Vaihda paikka';
-  if(open) el('place-query').focus(); else {clearTimeout(searchTimer); searchSeq++; el('place-results').replaceChildren(); el('place-status').textContent='';}
-}
+// Paneelin sulkeutuessa kesken jäänyt haku ja sen ehdotukset tyhjennetään.
+function resetSearch() { clearTimeout(searchTimer); searchSeq++; el('place-results').replaceChildren(); el('place-status').textContent=''; }
 // Ehdotukset haetaan kirjoittamisen aikana. Vanhat ehdotukset pysyvät näkyvissä, kunnes uudet saapuvat,
 // ja järjestysnumero estää hitaamman vanhan vastauksen korvaamasta uudempaa.
 let searchSeq=0, searchTimer=null;
@@ -72,7 +70,8 @@ async function searchPlaces(query) {
 }
 export async function initPlaces(changed) {
   onChange=changed;
-  el('place-toggle').addEventListener('click',()=>togglePanel(el('place-panel').hidden));
+  el('place-toggle').addEventListener('click',()=>openSheet('place'));
+  document.addEventListener('sheetclose',resetSearch);
   el('place-search').addEventListener('submit',e=>{e.preventDefault(); suggestPlaces(0);});
   el('place-query').addEventListener('input',()=>suggestPlaces(250));
   const stored=saved.get('omaavaruus.places',[]);
