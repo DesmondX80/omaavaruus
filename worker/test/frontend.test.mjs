@@ -23,7 +23,8 @@ describe("frontend", () => {
 
   it("JavaScript-tiedostot ovat syntaksiltaan kelvollisia", () => {
     for (const file of files.filter((f) => f.endsWith(".js"))) {
-      expect(() => execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" }), file).not.toThrow();
+      // Moduulina: tavallinen --check jäsentää .js-tiedoston ensin CommonJS:nä eikä huomaa kaikkia virheitä funktioiden sisällä.
+      expect(() => execFileSync(process.execPath, ["--input-type=module", "--check"], { input: read(file), stdio: "pipe" }), file).not.toThrow();
     }
   });
 
@@ -353,5 +354,39 @@ describe("avaruuslennon laukaisuikkunat", async () => {
   it("muotoilee lentoajan kelloksi", () => {
     expect(F.fmtDuration(123 * DAY + 4 * 3600000 + 12 * 60000 + 33500)).toBe("123 vrk 04:12:33");
     expect(F.fmtDuration(-5)).toBe("0 vrk 00:00:00");
+  });
+});
+
+describe("avaruuslennon ohjaamonäkymä", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const { BRIGHT_STARS } = await import("../../frontend/js/stars.js");
+  const { BRIGHT_STARS: WORKER_STARS } = await import("../src/stars.ts");
+  const start = Date.parse("2026-11-14T00:00:00Z"), DAY = 86400000;
+  const [tr] = F.findWindows("Maa", "Mars", start);
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+
+  it("ohjaamon tähtiluettelo on sama kuin Workerin", () => {
+    expect(BRIGHT_STARS).toEqual(WORKER_STARS);
+  });
+
+  it("alus ei ole planeetan sisällä lähtiessä eikä saapuessa", () => {
+    const dep = F.norm(sub(F.shipView(tr, tr.depart).r, F.planetState("Maa", tr.depart).r));
+    const arr = F.norm(sub(F.shipView(tr, tr.arrive).r, F.planetState("Mars", tr.arrive).r));
+    expect(dep).toBeGreaterThan(F.FLIGHT_BODIES.Maa.periKm);
+    expect(dep).toBeLessThan(50000);
+    expect(arr).toBeGreaterThan(F.FLIGHT_BODIES.Mars.periKm);
+    // Ennen laukaisua alus kulkee Maan mukana.
+    const before = F.shipView(tr, tr.depart - 30 * DAY);
+    expect(F.norm(sub(before.r, F.planetState("Maa", tr.depart - 30 * DAY).r))).toBeCloseTo(dep, 0);
+    // Keskellä lentoa näkymä on siirtorata.
+    const mid = (tr.depart + tr.arrive) / 2;
+    expect(F.norm(sub(F.shipView(tr, mid).r, F.shipState(tr, mid).r))).toBe(0);
+  });
+
+  it("vaikutuspiiristä poistutaan muutamassa vuorokaudessa", () => {
+    const days = (F.soiExit(tr) - tr.depart) / DAY;
+    expect(days).toBeGreaterThan(1);
+    expect(days).toBeLessThan(10);
+    expect(F.soiEntry(tr)).toBeGreaterThan(F.soiExit(tr));
   });
 });

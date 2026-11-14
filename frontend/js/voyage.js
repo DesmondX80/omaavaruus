@@ -31,6 +31,10 @@ let game=null, options=null, target=null, searchId=0, progress=0, frame=null, la
 // Lähtölaskennan päättymishetki (oikeaa aikaa), kartan rajaus, kiihdytyksen pienentämisestä kertova viesti
 // ja tieto siitä, onko näkymä piirretty saapumisen jälkeen.
 let countdown=null, mapRadius=null, mapFollow=false, notice='', shownArrived=false;
+// 3D-ohjaamo (cockpit.js) ladataan vasta, kun se näytetään ensimmäisen kerran. Sen kangas säilyy elementissä
+// cockpitHost, jota siirretään näkymästä toiseen, joten WebGL-kontekstia ei luoda uudelleen.
+const VIEW_KEY = 'avaruuslento.view';
+let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, launchedAt=-Infinity;
 
 // --- Kello ---
 
@@ -183,7 +187,7 @@ function waiting(body) {
   body.append(make('h3',null,`Lento ${NAMES[p.to][1]}`));
   body.append(list([['Lähtö',fmtDate(p.depart)],['Lentoaika',fmtDays((p.arrive-p.depart)/DAY)],['Perillä',fmtDate(p.arrive)],['Δv',`${dv(p.dvDep)} + ${dv(p.dvArr)} = ${dv(p.dvTotal)}`]],'voyage-plan'));
   const count=make('div','voyage-count'); count.id='voyage-count'; count.dataset.ready=ready ? '1' : '';
-  body.append(count);
+  body.append(count, viewSwitch(), showCockpit() ? cockpitStage() : mapStage());
   const cancel=button('sky-btn','Peru lento',()=>{game.plan=null; options=null; target=null; save(); render();});
   if(!ready) {
     body.append(make('p','muted','Odota laukaisuikkunaa tai kiihdytä aikaa. Kello pysähtyy laukaisuhetkeen, joten ikkuna ei mene ohi.'), warpButtons(),
@@ -213,6 +217,54 @@ function mapStage() {
   return stage;
 }
 
+// Ohjaamon ja kartan vaihto. Ohjaamo vaatii WebGL:n; jos sitä ei ole, näytetään kartta.
+function viewSwitch() {
+  const seg=make('div','seg voyage-view'); seg.setAttribute('role','group'); seg.setAttribute('aria-label','Näkymä');
+  for(const [id,label] of [['cockpit','Ohjaamo'],['map','Kartta']]) {
+    const b=button('',label,()=>{view=id; saved.set(VIEW_KEY,id); render();});
+    b.setAttribute('aria-pressed',String(showCockpit()===(id==='cockpit')));
+    if(id==='cockpit' && cockpitError) b.disabled=true;
+    seg.append(b);
+  }
+  return seg;
+}
+const showCockpit = () => view==='cockpit' && !cockpitError;
+
+function cockpitStage() {
+  if(!cockpitHost) {
+    cockpitHost=make('div','voyage-cockpit');
+    const tools=make('div','iss-map-modes');
+    tools.append(button('sky-btn','Katse eteen',()=>cockpit?.resetView()));
+    const sensor=button('sky-btn','Asentoanturi',async()=>{
+      try {sensor.setAttribute('aria-pressed',String(await cockpit?.toggleOrientation() ?? false));}
+      catch(e) {notice=e.message; render();}
+    });
+    sensor.setAttribute('aria-pressed','false');
+    if(typeof DeviceOrientationEvent==='undefined') sensor.hidden=true;
+    tools.append(sensor);
+    const loading=make('div','voyage-cockpit-loading','Ladataan ohjaamoa…');
+    cockpitHost.append(loading,tools);
+  }
+  if(!cockpitLoad) {
+    cockpitLoad=import('./cockpit.js').then(m=>{
+      cockpit=m.createCockpit(cockpitHost,cockpitState);
+      cockpitHost.querySelector('.voyage-cockpit-loading')?.remove();
+      syncCockpit();
+    }).catch(e=>{
+      console.warn('Ohjaamo ei käynnisty',e);
+      cockpitError='3D-ohjaamo ei toimi tällä laitteella (WebGL puuttuu), joten näytetään kartta.';
+      render();
+    });
+  }
+  return cockpitHost;
+}
+
+// Ohjaamo piirtää vain, kun se on näkyvissä.
+function syncCockpit() {
+  const visible=cockpit && cockpitHost?.isConnected && !el('voyage').hidden && !document.hidden;
+  if(visible) cockpit.start(); else cockpit?.stop();
+}
+
 function flying(body) {
   const f=game.flight, arrived=simNow()>=f.arrive;
   shownArrived=arrived;
@@ -220,7 +272,8 @@ function flying(body) {
   const stats=make('div','voyage-stats');
   stats.append(stat('Nopeus Auringon suhteen','voyage-speed','voyage-speed-sub'), stat(`Etäisyys ${NAMES[f.to][2]}`,'voyage-dist','voyage-eta'),
     stat('Etäisyys Auringosta','voyage-sun'), stat('Valon kulkuaika Maahan','voyage-light'));
-  body.append(clock, stats, mapStage());
+  body.append(clock, viewSwitch(), showCockpit() ? cockpitStage() : mapStage(), stats);
+  if(cockpitError) body.append(make('p','muted',cockpitError));
   if(arrived) {
     body.append(make('p',null,`Alus on ${NAMES[f.to][0]} luona. Jarrutuspoltto (${dv(f.dvArr)}) vie sen kiertoradalle ${orbitText(f.to)}.`),
       actions(button('voyage-go','Jarruta kiertoradalle',capture)));
@@ -236,7 +289,36 @@ function render() {
   const body=el('voyage-body');
   body.replaceChildren(status());
   if(game.flight) flying(body); else if(game.plan) waiting(body); else planning(body);
+  syncCockpit();
   update();
+}
+
+// Mittarien arvot lentonäkymään ja ohjaamon näytöille.
+function readouts(t) {
+  const f=game.flight, tr=f ?? game.plan;
+  const ship=f ? shipState(f,t) : planetState(tr.from,t), speed=norm(ship.v);
+  const near=f ? nearestPlanet(ship.r,ship.v,t) : {name:tr.from, speed:0};
+  return {
+    met: f ? `T+ ${fmtDuration(t-f.depart)}` : countdown ? `T− ${Math.max(1,Math.ceil((countdown-Date.now())/1000))} s` : `T− ${fmtDuration(tr.depart-t)}`,
+    date: fmtDate(t), speed, near,
+    dist: fmtKm(gap(ship.r,planetState(tr.to,t).r)),
+    eta: t<tr.arrive ? `perillä ${fmtDate(tr.arrive)}, T− ${fmtDuration(tr.arrive-t)}` : 'perillä',
+    sun: fmtKm(norm(ship.r)),
+    light: lightTime(gap(ship.r,planetState('Maa',t).r)),
+  };
+}
+
+function cockpitState() {
+  const t=simNow(), tr=game.flight ?? game.plan, r=readouts(t);
+  return {
+    t, tr, launched:!!game.flight, warp:WARPS[game.warp][0], launchAge:Date.now()-launchedAt,
+    countdown:countdown ? countdown-Date.now() : null,
+    screens:[
+      ['LENTOAIKA',[[r.met,36],[r.date,28,'#8b9ac0'],[WARPS[game.warp][1],28,'#ffb547']]],
+      ['NOPEUS',[[`${num(r.speed,2)} km/s`,44],[`${num(r.speed*3600)} km/h`,28,'#8b9ac0'],[game.flight ? `${r.near.name} ${num(r.near.speed,2)} km/s` : 'pysäköintirata',26,'#8b9ac0']]],
+      [`KOHDE: ${tr.to.toUpperCase()}`,[[r.dist,34],[`polttoaine ${num(game.fuel,2)} km/s`,26,'#8b9ac0']],game.fuel/FUEL_KMS],
+    ],
+  };
 }
 
 // Kellon, mittarien ja kartan päivitys ilman koko näkymän uudelleenrakentamista.
@@ -249,35 +331,33 @@ function update() {
     const left=game.plan.depart-t, count=document.getElementById('voyage-count');
     set('voyage-count',countdown ? `${Math.max(1,Math.ceil((countdown-Date.now())/1000))}` : left>0 ? `T− ${fmtDuration(left)}` : 'T− 0');
     if(count && left<=0 && !count.dataset.ready) {count.dataset.ready='1'; render();}
-    return;
   }
-  const f=game.flight;
-  if(!f) return;
-  const ship=shipState(f,t), speed=norm(ship.v), near=nearestPlanet(ship.r,ship.v,t);
-  set('voyage-met',`T+ ${fmtDuration(t-f.depart)}`);
-  set('voyage-speed',`${num(speed,2)} km/s`);
-  set('voyage-speed-sub',`${num(speed*3600)} km/h · ${NAMES[near.name][0]} suhteen ${num(near.speed,2)} km/s`);
-  set('voyage-dist',fmtKm(gap(ship.r,planetState(f.to,t).r)));
-  set('voyage-eta',t<f.arrive ? `perillä ${fmtDate(f.arrive)}, T− ${fmtDuration(f.arrive-t)}` : 'perillä');
-  set('voyage-sun',fmtKm(norm(ship.r)));
-  set('voyage-light',lightTime(gap(ship.r,planetState('Maa',t).r)));
+  if(!game.flight) {draw(); return;}
+  const r=readouts(t);
+  set('voyage-met',r.met);
+  set('voyage-speed',`${num(r.speed,2)} km/s`);
+  set('voyage-speed-sub',`${num(r.speed*3600)} km/h · ${NAMES[r.near.name][0]} suhteen ${num(r.near.speed,2)} km/s`);
+  set('voyage-dist',r.dist);
+  set('voyage-eta',r.eta);
+  set('voyage-sun',r.sun);
+  set('voyage-light',r.light);
   draw();
 }
 
 // --- Kartta ---
 
 function fitRadius() {
-  const f=game.flight;
+  const f=game.flight ?? game.plan;
   return Math.max(norm(f.r1),norm(planetState(f.to,f.arrive).r))/AU_KM*1.12;
 }
 
 function draw() {
-  const canvas=document.getElementById('voyage-map'), f=game?.flight;
+  const canvas=document.getElementById('voyage-map'), f=game?.flight ?? game?.plan;
   if(!canvas || !f) return;
   const w=canvas.clientWidth, h=canvas.clientHeight, scale=window.devicePixelRatio||1;
   if(!w||!h) return;
   if(canvas.width!==Math.round(w*scale) || canvas.height!==Math.round(h*scale)) {canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);}
-  const t=simNow(), ship=shipState(f,t), shipAu=toAu(ship.r);
+  const t=simNow(), ship=t>f.depart ? shipState(f,t) : planetState(f.from,t), shipAu=toAu(ship.r);
   const radius=mapRadius ?? fitRadius(), k=Math.min(w,h)/2/radius;
   const center=mapFollow ? shipAu : [0,0];
   const toPx=([x,y])=>[w/2+(x-center[0])*k, h/2-(y-center[1])*k];
@@ -345,7 +425,7 @@ function choose(o) {
 
 function launch() {
   const p=game.plan;
-  countdown=null; notice=''; mapRadius=null; mapFollow=false;
+  countdown=null; notice=''; mapRadius=null; mapFollow=false; launchedAt=Date.now();
   game.fuel=Math.max(0,game.fuel-p.dvDep);
   game.flight={...p, soi:soiEntry(p)};
   game.plan=null;
@@ -392,6 +472,7 @@ function close() {
   if(el('voyage').hidden) return;
   park();
   el('voyage').hidden=true; document.body.classList.remove('sky-locked');
+  syncCockpit();
 }
 // Sulkeminen palaa edelliseen näkymään, jos peli avattiin sovelluksesta; suoralla linkillä taivasnäkymään.
 function leave() {
@@ -408,7 +489,7 @@ export function initVoyage() {
   document.addEventListener('keydown',e=>{if(e.key==='Escape' && !el('voyage').hidden) leave();});
   document.addEventListener('visibilitychange',()=>{
     if(el('voyage').hidden) return;
-    if(document.hidden) park(); else {load(); render(); if(!frame) tick();}
+    if(document.hidden) {park(); syncCockpit();} else {load(); render(); if(!frame) tick();}
   });
   window.addEventListener('pagehide',park);
   window.addEventListener('resize',draw);

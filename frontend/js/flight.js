@@ -272,3 +272,39 @@ export function nearestPlanet(r, v, time) {
   }
   return best;
 }
+
+// Hyperbolisen ohitusradan asymptootti kulkee planeetan ohi etäisyydellä b = r_p·√(1 + 2μ/(r_p·v∞²)) (törmäysparametri).
+function asymptoteOffset(body, vinf) {
+  const {mu,periKm}=FLIGHT_BODIES[body], speed=norm(vinf);
+  const b=periKm*Math.sqrt(1+2*mu/(periKm*speed*speed));
+  let n=cross(vinf,[0,0,1]);
+  if(norm(n)<1e-9) n=[1,0,0];
+  return scale(n,b/norm(n));
+}
+
+/**
+ * Aluksen paikka ohjaamonäkymää varten. Siirtorata kulkee planeettojen keskipisteiden kautta, joten lähellä
+ * lähtö- ja kohdeplaneettaa paikkaa siirretään hyperbelin asymptootin etäisyydelle (törmäysparametri). Siirto
+ * häivytetään vaikutuspiirin rajalla, jolloin kaukana näkymä vastaa siirtorataa. Ennen laukaisua alus on
+ * lähtöplaneetan pysäköintiradalla.
+ */
+export function shipView(tr, time) {
+  const t=Math.max(time,tr.depart), s=shipState(tr,t);
+  const dep=planetState(tr.from,t), arr=planetState(tr.to,t);
+  const depOff=asymptoteOffset(tr.from,sub(tr.v1,planetState(tr.from,tr.depart).v));
+  const arrOff=asymptoteOffset(tr.to,sub(shipState(tr,tr.arrive).v,planetState(tr.to,tr.arrive).v));
+  if(time<=tr.depart) return {r:add(planetState(tr.from,time).r,depOff), v:planetState(tr.from,time).v};
+  const fade=(rel,body)=>Math.max(0,1-norm(rel)/FLIGHT_BODIES[body].soiKm);
+  const r=add(add(s.r,scale(depOff,fade(sub(s.r,dep.r),tr.from))),scale(arrOff,fade(sub(s.r,arr.r),tr.to)));
+  return {r, v:s.v};
+}
+
+/** Hetki (ms), jolloin alus poistuu lähtöplaneetan vaikutuspiiristä. */
+export function soiExit(tr) {
+  const soi=FLIGHT_BODIES[tr.from].soiKm;
+  const gap=t=>norm(sub(shipState(tr,t).r,planetState(tr.from,t).r))-soi;
+  let lo=tr.depart, hi=tr.arrive;
+  if(gap(hi)<0) return hi;
+  for(let i=0;i<60;i++) {const mid=(lo+hi)/2; if(gap(mid)<0) lo=mid; else hi=mid;}
+  return hi;
+}
