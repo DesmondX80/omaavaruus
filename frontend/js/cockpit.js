@@ -7,7 +7,7 @@
 //
 // Koordinaatit: ekliptikan (x, y, z) → three.js (x, z, −y), eli ekliptikan pohjoisnapa on ylöspäin.
 import * as THREE from './vendor/three-0.170.0.module.min.js';
-import { FLIGHT_BODIES, norm, planetState, shipView, soiExit } from './flight.js';
+import { FLIGHT_BODIES, planetState } from './flight.js';
 import { PLANETS, SUN_RADIUS_KM } from './planets.js';
 import { BRIGHT_STARS } from './stars.js';
 import { glowCanvas, planetCanvas, ringCanvas } from './textures.js';
@@ -140,7 +140,8 @@ function display() {
 
 /**
  * Luo ohjaamonäkymän elementtiin host. state() palauttaa joka ruudulla pelin tilan:
- * {t, tr (siirtorata tai suunnitelma), launched, warp, launchAge (ms laukaisusta), countdown (ms tai null), screens}.
+ * {t, ship: {r, v} (aluksen paikka km ja nopeus Auringon suhteen), aim (planeetta, johon nokka osoittaa, tai null),
+ *  warp, launchAge (ms laukaisusta), countdown (ms tai null), screens (kolmen näytön otsikko ja rivit)}.
  * Palauttaa {start, stop, resetView} tai heittää virheen, jos WebGL ei ole käytettävissä.
  */
 export function createCockpit(host, state) {
@@ -157,11 +158,12 @@ export function createCockpit(host, state) {
   head.add(camera); ship.add(head); scene.add(ship);
   scene.add(stars());
 
-  // Aurinko: pallo, häikäisy ja valonlähde, joka valaisee planeetat oikealta puolelta.
+  // Aurinko: pallo, häikäisy ja valonlähde, joka valaisee planeetat oikealta puolelta. Himmeä hajavalo erottaa
+  // planeetan yöpuolen, kun alus kiertää sitä varjon puolella.
   const sunGlow=new THREE.Sprite(new THREE.SpriteMaterial({map:texture(glowCanvas('rgba(255,255,240,1)','rgba(255,200,90,.35)')), depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false}));
   const sunCore=new THREE.Mesh(new THREE.SphereGeometry(SUN_RADIUS_KM*KM,32,16),new THREE.MeshBasicMaterial({color:0xfff6dc, toneMapped:false}));
   const sunLight=new THREE.PointLight(0xffffff,3.2,0,0);
-  scene.add(sunGlow,sunCore,sunLight,new THREE.AmbientLight(0x8090b0,0.04));
+  scene.add(sunGlow,sunCore,sunLight,new THREE.AmbientLight(0x8090b0,0.18));
 
   // Planeetat: pallo tekstuureineen ja piste, joka pitää kaukaisen planeetan näkyvänä kirkkaana pisteenä.
   const planets=PLANETS.map(p=>{
@@ -214,10 +216,9 @@ export function createCockpit(host, state) {
     orientation=orientationBase.clone().multiply(q); moved=performance.now();
   };
 
-  // Aluksen asento: nokka osoittaa lähtöplaneettaan, kunnes sen vaikutuspiiri on takana, sitten kohteeseen.
-  // Asento kääntyy pehmeästi. Ennen laukaisua katsotaan lähtöplaneettaa.
+  // Aluksen asento: nokka osoittaa kohteeseen aim, ja asento kääntyy pehmeästi.
   const look=new THREE.Matrix4(), want=new THREE.Quaternion(), origin=new THREE.Vector3(), up=new THREE.Vector3(0,1,0);
-  let exitCache=null, attitudeReady=false;
+  let attitudeReady=false;
 
   let running=false, frame=null, lastFrame=0, lastRender=0;
   function resize() {
@@ -228,9 +229,7 @@ export function createCockpit(host, state) {
   }
 
   function update(now) {
-    const s=state(), tr=s.tr;
-    if(!tr) return false;
-    const t=s.t, view=shipView(tr,t);
+    const s=state(), t=s.t, view=s.ship;
     // Floating origin: kaikki paikat aluksen suhteen, metreinä.
     const rel=km=>toScene([(km[0]-view.r[0])*KM,(km[1]-view.r[1])*KM,(km[2]-view.r[2])*KM]);
     const sun=rel([0,0,0]);
@@ -244,10 +243,8 @@ export function createCockpit(host, state) {
       // Piste piilotetaan, kun pallo näkyy itse riittävän suurena.
       p.dot.visible=FLIGHT_BODIES[p.name].radiusKm*KM/pos.length()*k<2;
     }
-    if(!exitCache || exitCache.tr!==tr) exitCache={tr, exit:s.launched ? soiExit(tr) : Infinity};
-    const aim=t<exitCache.exit ? tr.from : tr.to;
-    const target=rel(planetState(aim,t).r);
-    look.lookAt(origin,target,up); want.setFromRotationMatrix(look);
+    if(s.aim) {look.lookAt(origin,rel(planetState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
+    else want.copy(ship.quaternion);
     if(!attitudeReady) {ship.quaternion.copy(want); attitudeReady=true;}
     const turning=ship.quaternion.angleTo(want)>1e-4;
     ship.quaternion.slerp(want,Math.min(1,(now-lastFrame)/1500));

@@ -31,6 +31,7 @@ const SHELL = [
   "js/now.js",
   "js/outlook.js",
   "js/places.js",
+  "js/planetinfo.js",
   "js/planets.js",
   "js/push.js",
   "js/sheets.js",

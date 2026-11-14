@@ -390,3 +390,51 @@ describe("avaruuslennon ohjaamonäkymä", async () => {
     expect(F.soiEntry(tr)).toBeGreaterThan(F.soiExit(tr));
   });
 });
+
+describe("avaruuslennon saapuminen ja jatkolennot", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const { PLANET_INFO } = await import("../../frontend/js/planetinfo.js");
+  const { PLANETS } = await import("../../frontend/js/planets.js");
+  const start = Date.parse("2026-11-14T00:00:00Z");
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+
+  it("pysäköintirata kiertää planeettaa oikealla korkeudella ja nopeudella", () => {
+    const s = F.parkingState("Maa", start), p = F.planetState("Maa", start);
+    const r = F.norm(sub(s.r, p.r));
+    expect(r).toBeGreaterThanOrEqual(F.FLIGHT_BODIES.Maa.periKm - 1);
+    expect(r).toBeLessThanOrEqual(F.FLIGHT_BODIES.Maa.apoKm + 1);
+    // Matalan Maan kiertoradan nopeus on noin 7,8 km/s.
+    expect(F.norm(s.rel.v)).toBeCloseTo(7.79, 1);
+  });
+
+  it("lentää Auringon kiertoradalta (ohilennon jälkeen) uuteen kohteeseen", () => {
+    const [tr] = F.findWindows("Maa", "Mars", start);
+    const s = F.shipState(tr, tr.arrive);
+    const drift = { r: s.r, v: s.v, t: tr.arrive };
+    expect(F.isPlanet(drift)).toBe(false);
+    expect(F.norm(sub(F.departureState(drift, tr.arrive).r, s.r))).toBeLessThan(1e-3);
+    const options = F.findWindows(drift, "Jupiter", tr.arrive, { fuel: 20 });
+    expect(options.length).toBeGreaterThan(0);
+    // Auringon kiertoradalta lähtö on suoraan nopeuksien erotus.
+    expect(options[0].dvDep).toBeCloseTo(options[0].vinfDep, 10);
+    expect(F.soiExit(options[0])).toBe(options[0].depart);
+    expect(F.norm(sub(F.shipView(options[0], options[0].depart - 86400000).r, F.departureState(drift, options[0].depart - 86400000).r))).toBeLessThan(1);
+  });
+
+  it("laskee lennon pituuden ja huippunopeuden lokikirjaan", () => {
+    const [tr] = F.findWindows("Maa", "Mars", start);
+    const { km, maxSpeed } = F.flightStats(tr);
+    // Maa→Mars-siirtorata on noin puolikas ellipsi: 400–600 miljoonaa km, nopeus suurin lähdössä.
+    expect(km / 1e6).toBeGreaterThan(350);
+    expect(km / 1e6).toBeLessThan(650);
+    expect(maxSpeed).toBeCloseTo(F.norm(tr.v1), 1);
+  });
+
+  it("jokaisella planeetalla on tietokortti", () => {
+    for (const { name } of PLANETS) {
+      const info = PLANET_INFO[name];
+      for (const key of ["diameter", "mass", "gravity", "day", "year", "temperature", "atmosphere", "moons"]) expect(info[key], `${name} ${key}`).toBeTruthy();
+      expect(info.facts.length, name).toBeGreaterThanOrEqual(2);
+    }
+  });
+});

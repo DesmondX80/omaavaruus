@@ -334,3 +334,16 @@ html.nightvision { background: #000; }
 .voyage-cockpit-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 .voyage-cockpit .sky-btn { min-height: 32px; background: rgba(5,7,15,.7); }
 .voyage-cockpit .sky-btn[hidden] { display: none; }
+.voyage-info { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-card); }
+.voyage-info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+.voyage-info dt { color: var(--muted); }
+.voyage-info dd { margin: 0; }
+.voyage-facts { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.voyage-survey { display: grid; gap: 8px; }
+.voyage-survey:empty { display: none; }
+.voyage-targets .voyage-new::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--warm); vertical-align: middle; }
+.voyage-log { padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-card); }
+.voyage-log summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.voyage-log[open] { display: grid; gap: 10px; }
+.voyage-flights { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.voyage-flights li { display: grid; gap: 1px; padding-top: 6px; border-top: 1px solid var(--line); }

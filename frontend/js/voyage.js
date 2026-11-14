@@ -6,7 +6,8 @@
 // tai taustalla, aika kulkee oikeaa vauhtia (1×), joten raketti lentää myös sovelluksen ollessa kiinni.
 // Kello pysähtyy laukaisuhetkeen ja saapumiseen, jotta ne eivät mene ohi.
 import { el, num, saved, button } from './core.js';
-import { FLIGHT_BODIES, FUEL_KMS, fmtDuration, nearestPlanet, norm, planetState, shipState, soiEntry, transfer, windowSearch } from './flight.js';
+import { FLIGHT_BODIES, FUEL_KMS, departureState, flightStats, fmtDuration, isPlanet, nearestPlanet, norm, parkingState, planetState, shipState, shipView, soiEntry, soiExit, transfer, windowSearch } from './flight.js';
+import { PLANET_INFO } from './planetinfo.js';
 import { AU_KM, LIGHT_AU_PER_MIN, solarSystem } from './planets.js';
 import { drawScene } from './solarsystem.js';
 
@@ -25,12 +26,17 @@ const NAMES = {
 };
 const KINDS = {cheapest:['Halvin','Vähiten polttoainetta'], faster:['Nopeampi','Lyhyempi lento, enemmän polttoainetta'], earliest:['Aikaisin perillä','Nopein reitti, johon polttoaine riittää']};
 const SHIP_COLOR = '#ffb547';
+/** Planeetan tutkiminen (ja tankkaus) kestää vuorokauden pelin aikaa. */
+const SURVEY_MS = DAY;
 
-const fresh = () => ({v:1, location:'Maa', fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0, plan:null, flight:null, log:[]});
+// location: planeetta, jonka kiertoradalla alus on, tai null, kun alus on ohilennon jälkeen Auringon kiertoradalla
+// (drift = {r, v, t}). Maa on kotiplaneetta, joten se on tutkittu alusta asti.
+const fresh = () => ({v:1, location:'Maa', drift:null, fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0,
+  plan:null, flight:null, survey:null, explored:['Maa'], flights:[], log:[]});
 let game=null, options=null, target=null, searchId=0, progress=0, frame=null, lastSave=0;
 // Lähtölaskennan päättymishetki (oikeaa aikaa), kartan rajaus, kiihdytyksen pienentämisestä kertova viesti
 // ja tieto siitä, onko näkymä piirretty saapumisen jälkeen.
-let countdown=null, mapRadius=null, mapFollow=false, notice='', shownArrived=false;
+let countdown=null, mapRadius=null, mapFollow=false, notice='', shownArrived=false, logOpen=false;
 // 3D-ohjaamo (cockpit.js) ladataan vasta, kun se näytetään ensimmäisen kerran. Sen kangas säilyy elementissä
 // cockpitHost, jota siirretään näkymästä toiseen, joten WebGL-kontekstia ei luoda uudelleen.
 const VIEW_KEY = 'avaruuslento.view';
@@ -98,6 +104,8 @@ function lightTime(km) {
   const min=km/AU_KM/LIGHT_AU_PER_MIN;
   return min<1 ? `${num(min*60)} s` : min<120 ? `${num(min,1)} min` : `${num(min/60,1)} h`;
 }
+const here = () => game.location ?? game.drift;
+const fromText = from => isPlanet(from) ? `${NAMES[from][0]} kiertoradalta` : 'Auringon kiertoradalta';
 function orbitText(name) {
   const b=FLIGHT_BODIES[name], peri=b.periKm-b.radiusKm, apo=b.apoKm-b.radiusKm;
   return peri===apo ? `${num(peri)} km korkeudella` : `${num(peri)} × ${num(apo)} km radalla`;
@@ -129,8 +137,9 @@ function status() {
   const box=make('div','voyage-status');
   const where=make('div','stat');
   where.append(make('span',null,'Sijainti'));
-  if(game.flight) where.append(make('b',null,`Matkalla ${NAMES[game.flight.to][1]}`), make('small','muted',`lähtö ${NAMES[game.flight.from][0]} kiertoradalta`));
-  else where.append(make('b',null,`${NAMES[game.location][0]} kiertoradalla`), make('small','muted',orbitText(game.location)));
+  if(game.flight) where.append(make('b',null,`Matkalla ${NAMES[game.flight.to][1]}`), make('small','muted',`lähtö ${fromText(game.flight.from)}`));
+  else if(game.location) where.append(make('b',null,`${NAMES[game.location][0]} kiertoradalla`), make('small','muted',orbitText(game.location)));
+  else where.append(make('b',null,'Auringon kiertoradalla'), make('small','muted','ohilennon jälkeen'));
   const fuel=make('div','stat');
   const meter=make('div','voyage-meter'), bar=make('i');
   bar.style.width=`${Math.max(0,Math.min(100,game.fuel/FUEL_KMS*100))}%`; meter.append(bar);
@@ -155,21 +164,90 @@ function optionCard(o) {
   return card;
 }
 
-function planning(body) {
+// Planeetan tietokortti. Kiinnostavat faktat paljastuvat, kun planeetta on tutkittu.
+function infoCard(name) {
+  const info=PLANET_INFO[name], explored=game.explored.includes(name);
+  const card=make('div','voyage-info');
+  const head=make('div','voyage-option-head');
+  head.append(make('b',null,name), make('span',`level${explored ? '' : ' off'}`,explored ? 'tutkittu' : 'tutkimatta'));
+  card.append(head, list([['Halkaisija',info.diameter],['Massa',info.mass],['Painovoima',info.gravity],['Vuorokausi',info.day],['Vuosi',info.year],
+    ['Lämpötila',info.temperature],['Kaasukehä',info.atmosphere],['Kuut',info.moons]]));
+  if(explored) {
+    const facts=make('ul','voyage-facts');
+    facts.append(...info.facts.map(f=>make('li',null,f)));
+    card.append(make('h3',null,'Tutkimuksen löydöt'), facts);
+  }
+  return card;
+}
+
+// Tutkiminen tai tankkaus: kestää vuorokauden pelin aikaa (kiihdytyksellä nopeammin) ja täyttää polttoaineen.
+function surveyPanel() {
+  const name=game.location, explored=game.explored.includes(name), box=make('div','voyage-survey');
+  if(game.survey) {
+    const p=make('div','voyage-progress'); const bar=make('i'); bar.id='voyage-survey-bar'; p.append(bar);
+    const label=make('p','muted'); label.id='voyage-survey-label';
+    box.append(label,p,warpButtons());
+  } else if(!explored) {
+    box.append(make('p',null,`Tutki ${name} kiertoradalta. Kartoitus kestää vuorokauden, ja sen jälkeen polttoaine täydennetään.`),
+      actions(button('voyage-go','Tutki planeetta',startSurvey)));
+  } else if(game.fuel<FUEL_KMS-0.005) {
+    box.append(make('p','muted',`${name} on jo tutkittu. Tankkaus kestää vuorokauden.`), actions(button('sky-btn','Tankkaa',startSurvey)));
+  }
+  return box;
+}
+
+function logbook() {
+  const d=make('details','voyage-log'); d.open=logOpen;
+  d.addEventListener('toggle',()=>{logOpen=d.open;});
+  d.append(make('summary',null,'Lokikirja'));
+  const fl=game.flights, total=fl.reduce((s,f)=>s+f.arrive-f.depart,0), km=fl.reduce((s,f)=>s+f.km,0), top=fl.reduce((m,f)=>Math.max(m,f.maxSpeed),0);
+  d.append(list([
+    ['Tutkitut planeetat',`${game.explored.length}/8: ${game.explored.join(', ')}`],
+    ['Lentoja',String(fl.length)],
+    ['Lentoaika yhteensä',fl.length ? fmtDays(total/DAY) : '–'],
+    ['Kuljettu matka',fl.length ? fmtKm(km) : '–'],
+    ['Huippunopeus',fl.length ? `${num(top,2)} km/s (${num(top*3600)} km/h)` : '–'],
+  ],'voyage-plan'));
+  if(fl.length) {
+    d.append(make('h3',null,'Lennot'));
+    const ul=make('ul','voyage-flights');
+    for(const f of [...fl].reverse()) {
+      const li=make('li');
+      li.append(make('b',null,`${f.fromName} → ${f.to}${f.captured ? '' : ' (ohilento)'}`),
+        make('span','muted',`${new Date(f.depart).toLocaleDateString('fi-FI')}–${new Date(f.arrive).toLocaleDateString('fi-FI')} · ${fmtDays((f.arrive-f.depart)/DAY)} · ${fmtKm(f.km)}`));
+      ul.append(li);
+    }
+    d.append(ul);
+  }
+  if(game.log.length) {
+    d.append(make('h3',null,'Tapahtumat'));
+    const ul=make('ul','voyage-flights');
+    for(const e of game.log.slice(-30).reverse()) {const li=make('li'); li.append(make('span','muted',fmtDate(e.t)), make('span',null,e.text)); ul.append(li);}
+    d.append(ul);
+  }
+  return d;
+}
+
+function orbiting(body) {
+  if(game.location) body.append(infoCard(game.location), surveyPanel());
+  else body.append(make('p',null,'Polttoaine ei riittänyt jarrutukseen, joten alus ohitti kohteen ja kiertää nyt Aurinkoa. Suunnittele uusi reitti, jos polttoaine riittää, tai aloita alusta.'));
+  body.append(viewSwitch(), showCockpit() ? cockpitStage() : mapStage());
+  if(!game.survey) body.append(warpButtons());
+  if(game.survey) {body.append(logbook()); return;}
   body.append(make('h3',null,'Valitse kohde'));
   const targets=make('div','voyage-targets');
   for(const name of Object.keys(FLIGHT_BODIES)) {
     if(name===game.location) continue;
-    const b=button('sky-btn',name,()=>search(name));
+    const b=button(`sky-btn${game.explored.includes(name) ? '' : ' voyage-new'}`,name,()=>search(name));
     b.setAttribute('aria-pressed',String(name===target));
     targets.append(b);
   }
   body.append(targets);
   if(!target) {
-    body.append(make('p','muted','Sovellus laskee siirtoradan valmiiksi: se etsii seuraavan kahden vuoden laukaisuikkunat ja näyttää halvimman sekä nopeammat vaihtoehdot. Polttoaine täydentyy, kun kohdeplaneetta on tutkittu.'));
+    body.append(make('p','muted','Sovellus laskee siirtoradan valmiiksi: se etsii seuraavan kahden vuoden laukaisuikkunat ja näyttää halvimman sekä nopeammat vaihtoehdot. Tutkimattomat planeetat on merkitty pisteellä. Polttoaine täydentyy, kun kohdeplaneetta on tutkittu.'));
   } else if(!options) {
     const p=make('div','voyage-progress'); const bar=make('i'); bar.id='voyage-progress-bar'; bar.style.width=`${progress*100}%`; p.append(bar);
-    body.append(make('p','muted',`Haetaan laukaisuikkunoita: ${NAMES[game.location][0]} kiertoradalta ${NAMES[target][1]}…`), p);
+    body.append(make('p','muted',`Haetaan laukaisuikkunoita: ${fromText(here())} ${NAMES[target][1]}…`), p);
   } else if(!options.length) {
     body.append(make('p','muted','Siirtorataa ei löytynyt. Kokeile toista kohdetta.'));
   } else {
@@ -177,8 +255,11 @@ function planning(body) {
     const cards=make('div','voyage-options');
     cards.append(...options.map(optionCard));
     body.append(cards);
-    if(options.every(o=>!o.fuelOk)) body.append(make('p','muted','Polttoaine ei riitä yhteenkään vaihtoehtoon. Valitse lähempi kohde.'));
+    if(options.every(o=>!o.fuelOk)) body.append(make('p','muted',game.location && !game.explored.includes(game.location)
+      ? 'Polttoaine ei riitä yhteenkään vaihtoehtoon. Tutki planeetta, niin polttoaine täydennetään.'
+      : game.location ? 'Polttoaine ei riitä yhteenkään vaihtoehtoon. Tankkaa tai valitse lähempi kohde.' : 'Polttoaine ei riitä yhteenkään vaihtoehtoon.'));
   }
+  body.append(logbook());
   if(game.log.length) body.append(actions(button('sky-btn','Aloita alusta',restart)));
 }
 
@@ -274,9 +355,12 @@ function flying(body) {
     stat('Etäisyys Auringosta','voyage-sun'), stat('Valon kulkuaika Maahan','voyage-light'));
   body.append(clock, viewSwitch(), showCockpit() ? cockpitStage() : mapStage(), stats);
   if(cockpitError) body.append(make('p','muted',cockpitError));
-  if(arrived) {
+  if(arrived && game.fuel>=f.dvArr-1e-9) {
     body.append(make('p',null,`Alus on ${NAMES[f.to][0]} luona. Jarrutuspoltto (${dv(f.dvArr)}) vie sen kiertoradalle ${orbitText(f.to)}.`),
       actions(button('voyage-go','Jarruta kiertoradalle',capture)));
+  } else if(arrived) {
+    body.append(make('p',null,`Alus on ${NAMES[f.to][0]} luona, mutta polttoaine (${dv(game.fuel)}) ei riitä jarrutukseen (${dv(f.dvArr)}). Alus ohittaa planeetan ja jatkaa Auringon ympäri.`),
+      actions(button('voyage-go','Jatka ohilentoa',capture)));
   } else {
     const n=make('p','muted',notice || `${NAMES[f.to][0]} vaikutuspiiriin ${fmtDate(f.soi)}. Kiihdytys pienenee automaattisesti ennen sitä ja ennen saapumista.`);
     body.append(warpButtons(), n);
@@ -288,7 +372,7 @@ function render() {
   if(!game || el('voyage').hidden) return;
   const body=el('voyage-body');
   body.replaceChildren(status());
-  if(game.flight) flying(body); else if(game.plan) waiting(body); else planning(body);
+  if(game.flight) flying(body); else if(game.plan) waiting(body); else orbiting(body);
   syncCockpit();
   update();
 }
@@ -296,8 +380,8 @@ function render() {
 // Mittarien arvot lentonäkymään ja ohjaamon näytöille.
 function readouts(t) {
   const f=game.flight, tr=f ?? game.plan;
-  const ship=f ? shipState(f,t) : planetState(tr.from,t), speed=norm(ship.v);
-  const near=f ? nearestPlanet(ship.r,ship.v,t) : {name:tr.from, speed:0};
+  const ship=f ? shipState(f,t) : departureState(tr.from,t), speed=norm(ship.v);
+  const near=f || !isPlanet(tr.from) ? nearestPlanet(ship.r,ship.v,t) : {name:tr.from, speed:0};
   return {
     met: f ? `T+ ${fmtDuration(t-f.depart)}` : countdown ? `T− ${Math.max(1,Math.ceil((countdown-Date.now())/1000))} s` : `T− ${fmtDuration(tr.depart-t)}`,
     date: fmtDate(t), speed, near,
@@ -308,11 +392,28 @@ function readouts(t) {
   };
 }
 
+// Ohjaamon tila: aluksen paikka, nokan suunta ja näyttöjen tekstit.
+// Lennolla nokka osoittaa lähtöplaneettaan, kunnes sen vaikutuspiiri on takana, ja sitten kohteeseen.
+// Kiertoradalla ja ennen laukaisua alus kiertää planeettaa, joka täyttää ikkunan.
 function cockpitState() {
-  const t=simNow(), tr=game.flight ?? game.plan, r=readouts(t);
+  const t=simNow(), base={t, warp:WARPS[game.warp][0], launchAge:Date.now()-launchedAt, countdown:countdown ? countdown-Date.now() : null};
+  const tr=game.flight ?? game.plan;
+  if(!tr) {
+    const name=game.location, ship=name ? parkingState(name,t) : departureState(game.drift,t);
+    const date=[fmtDate(t),28,'#8b9ac0'], warp=[WARPS[game.warp][1],28,'#ffb547'];
+    return {...base, ship, aim:name,
+      screens:[
+        [name ? 'KIERTORATA' : 'AURINGON KIERTORATA',[[fmtClock(t),36],date,warp]],
+        ['NOPEUS',name ? [[`${num(norm(ship.rel.v),2)} km/s`,44],[`${num(norm(ship.rel.v)*3600)} km/h`,28,'#8b9ac0'],[`${name} ${num(norm(ship.rel.r)-FLIGHT_BODIES[name].radiusKm)} km`,26,'#8b9ac0']]
+          : [[`${num(norm(ship.v),2)} km/s`,44],['Auringon suhteen',28,'#8b9ac0']]],
+        [name ? name.toUpperCase() : 'POLTTOAINE',[[game.survey ? 'kartoitus käynnissä' : name && game.explored.includes(name) ? 'tutkittu' : name ? 'tutkimatta' : '',30],[`polttoaine ${num(game.fuel,2)} km/s`,26,'#8b9ac0']],game.fuel/FUEL_KMS],
+      ]};
+  }
+  const r=readouts(t);
+  const ship=game.flight ? shipView(tr,t) : isPlanet(tr.from) ? parkingState(tr.from,t) : departureState(tr.from,t);
+  const aim=game.flight ? (isPlanet(tr.from) && t<tr.exit ? tr.from : tr.to) : isPlanet(tr.from) ? tr.from : tr.to;
   return {
-    t, tr, launched:!!game.flight, warp:WARPS[game.warp][0], launchAge:Date.now()-launchedAt,
-    countdown:countdown ? countdown-Date.now() : null,
+    ...base, ship, aim,
     screens:[
       ['LENTOAIKA',[[r.met,36],[r.date,28,'#8b9ac0'],[WARPS[game.warp][1],28,'#ffb547']]],
       ['NOPEUS',[[`${num(r.speed,2)} km/s`,44],[`${num(r.speed*3600)} km/h`,28,'#8b9ac0'],[game.flight ? `${r.near.name} ${num(r.near.speed,2)} km/s` : 'pysäköintirata',26,'#8b9ac0']]],
@@ -332,6 +433,11 @@ function update() {
     set('voyage-count',countdown ? `${Math.max(1,Math.ceil((countdown-Date.now())/1000))}` : left>0 ? `T− ${fmtDuration(left)}` : 'T− 0');
     if(count && left<=0 && !count.dataset.ready) {count.dataset.ready='1'; render();}
   }
+  if(game.survey) {
+    const f=Math.min(1,(t-game.survey.start)/SURVEY_MS), bar=document.getElementById('voyage-survey-bar');
+    if(bar) bar.style.width=`${f*100}%`;
+    set('voyage-survey-label',`${game.explored.includes(game.survey.body) ? 'Tankkaus' : `Kartoitus: ${game.survey.body}`} ${num(f*100)} % · valmis ${fmtDate(game.survey.start+SURVEY_MS)} ${fmtClock(game.survey.start+SURVEY_MS)}`);
+  }
   if(!game.flight) {draw(); return;}
   const r=readouts(t);
   set('voyage-met',r.met);
@@ -348,23 +454,28 @@ function update() {
 
 function fitRadius() {
   const f=game.flight ?? game.plan;
+  if(!f) return Math.max(1.6,norm(departureState(here(),simNow()).r)/AU_KM*1.25);
   return Math.max(norm(f.r1),norm(planetState(f.to,f.arrive).r))/AU_KM*1.12;
 }
 
 function draw() {
   const canvas=document.getElementById('voyage-map'), f=game?.flight ?? game?.plan;
-  if(!canvas || !f) return;
+  if(!canvas || !game) return;
   const w=canvas.clientWidth, h=canvas.clientHeight, scale=window.devicePixelRatio||1;
   if(!w||!h) return;
   if(canvas.width!==Math.round(w*scale) || canvas.height!==Math.round(h*scale)) {canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);}
-  const t=simNow(), ship=t>f.depart ? shipState(f,t) : planetState(f.from,t), shipAu=toAu(ship.r);
+  const t=simNow(), ship=!f ? departureState(here(),t) : t>f.depart ? shipState(f,t) : departureState(f.from,t), shipAu=toAu(ship.r);
   const radius=mapRadius ?? fitRadius(), k=Math.min(w,h)/2/radius;
   const center=mapFollow ? shipAu : [0,0];
   const toPx=([x,y])=>[w/2+(x-center[0])*k, h/2-(y-center[1])*k];
   const ctx=canvas.getContext('2d');
   ctx.setTransform(scale,0,0,scale,0,0);
-  drawScene(ctx,solarSystem(t),toPx,w,h,k,f.to);
+  drawScene(ctx,solarSystem(t),toPx,w,h,k,f?.to ?? game.location);
+  if(f) drawTransfer(ctx,f,t,toPx,w);
+  drawShip(ctx,toPx(shipAu),ship.v);
+}
 
+function drawTransfer(ctx, f, t, toPx, w) {
   // Kuljettu reitti yhtenäisenä ja tuleva rata katkoviivana.
   const N=240, path=(a,b)=>{
     ctx.beginPath();
@@ -384,10 +495,11 @@ function draw() {
     const half=ctx.measureText(label).width/2+4, lx=Math.max(half,Math.min(w-half,ax));
     ctx.strokeText(label,lx,ay+20); ctx.fillStyle='#c9d3ec'; ctx.fillText(label,lx,ay+20);
   }
+}
 
-  // Alus kolmiona nopeuden suuntaan.
-  const [sx,sy]=toPx(shipAu);
-  ctx.save(); ctx.translate(sx,sy); ctx.rotate(Math.atan2(-ship.v[1],ship.v[0]));
+// Alus kolmiona nopeuden suuntaan.
+function drawShip(ctx, [sx,sy], v) {
+  ctx.save(); ctx.translate(sx,sy); ctx.rotate(Math.atan2(-v[1],v[0]));
   ctx.beginPath(); ctx.moveTo(9,0); ctx.lineTo(-6,5); ctx.lineTo(-3,0); ctx.lineTo(-6,-5); ctx.closePath();
   ctx.fillStyle=SHIP_COLOR; ctx.fill(); ctx.lineWidth=1; ctx.strokeStyle='#03050b'; ctx.stroke();
   ctx.restore();
@@ -397,7 +509,7 @@ function draw() {
 
 async function search(to) {
   const id=++searchId; target=to; options=null; progress=0; render();
-  const it=windowSearch(game.location,to,simNow(),{fuel:game.fuel});
+  const it=windowSearch(here(),to,simNow(),{fuel:game.fuel});
   let last=performance.now();
   for(;;) {
     const r=it.next();
@@ -427,18 +539,40 @@ function launch() {
   const p=game.plan;
   countdown=null; notice=''; mapRadius=null; mapFollow=false; launchedAt=Date.now();
   game.fuel=Math.max(0,game.fuel-p.dvDep);
-  game.flight={...p, soi:soiEntry(p)};
-  game.plan=null;
-  game.log.push({t:p.depart, text:`Laukaisu ${NAMES[p.from][0]} kiertoradalta kohti ${NAMES[p.to][2]} (Δv ${dv(p.dvDep)})`});
+  game.flight={...p, soi:soiEntry(p), exit:soiExit(p)};
+  game.plan=null; game.drift=null; game.location=null;
+  game.log.push({t:p.depart, text:`Laukaisu ${fromText(p.from)} kohti ${NAMES[p.to][2]} (Δv ${dv(p.dvDep)})`});
   anchor(p.depart,0); render();
 }
 
+// Saapuminen: jarrutus kiertoradalle, tai ohilento, jos polttoaine ei riitä. Lento kirjataan lokikirjaan.
 function capture() {
-  const f=game.flight;
-  game.fuel=Math.max(0,game.fuel-f.dvArr);
-  game.location=f.to; game.flight=null; options=null; target=null; notice='';
-  game.log.push({t:f.arrive, text:`Saapuminen ${NAMES[f.to][0]} kiertoradalle ${fmtDays((f.arrive-f.depart)/DAY)} lennon jälkeen (Δv ${dv(f.dvArr)})`});
+  const f=game.flight, captured=game.fuel>=f.dvArr-1e-9, stats=flightStats(f);
+  game.flights.push({fromName:isPlanet(f.from) ? f.from : 'Auringon kiertorata', to:f.to, depart:f.depart, arrive:f.arrive, km:stats.km, maxSpeed:stats.maxSpeed, captured});
+  if(captured) {
+    game.fuel=Math.max(0,game.fuel-f.dvArr);
+    game.location=f.to; game.drift=null;
+    game.log.push({t:f.arrive, text:`Saapuminen ${NAMES[f.to][0]} kiertoradalle ${fmtDays((f.arrive-f.depart)/DAY)} lennon jälkeen (Δv ${dv(f.dvArr)})`});
+  } else {
+    const s=shipState(f,f.arrive);
+    game.location=null; game.drift={r:s.r, v:s.v, t:f.arrive};
+    game.log.push({t:f.arrive, text:`Ohilento: polttoaine ei riittänyt jarrutukseen ${NAMES[f.to][0]} kiertoradalle`});
+  }
+  game.flight=null; options=null; target=null; notice='';
   anchor(f.arrive,0); render();
+}
+
+function startSurvey() {
+  game.survey={body:game.location, start:simNow()};
+  save(); render();
+}
+function finishSurvey() {
+  const {body,start}=game.survey, first=!game.explored.includes(body);
+  if(first) game.explored.push(body);
+  game.fuel=FUEL_KMS; game.survey=null; logOpen=false;
+  game.log.push({t:start+SURVEY_MS, text:first ? `${body} tutkittu (${game.explored.length}/8), polttoaine täydennetty` : `Tankkaus ${NAMES[body][0]} kiertoradalla`});
+  if(game.explored.length===8 && first) game.log.push({t:start+SURVEY_MS, text:'Kaikki aurinkokunnan planeetat on tutkittu!'});
+  notice=''; save(); render();
 }
 
 function restart() {
@@ -455,7 +589,8 @@ function tick() {
   if(countdown && Date.now()>=countdown) launch();
   const t=simNow();
   limitWarp(t);
-  if(game.flight && t>=game.flight.arrive && !shownArrived) render();
+  if(game.survey && t>=game.survey.start+SURVEY_MS) finishSurvey();
+  else if(game.flight && t>=game.flight.arrive && !shownArrived) render();
   else update();
   if(Date.now()-lastSave>5000) save();
   frame=setTimeout(()=>requestAnimationFrame(tick),game.flight ? 50 : 100);
