@@ -19,6 +19,7 @@ const SHELL = [
   "js/cameras.js",
   "js/core.js",
   "js/events.js",
+  "js/flight.js",
   "js/info.js",
   "js/iss.js",
   "js/issmap.js",

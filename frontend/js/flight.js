@@ -1,0 +1,172 @@
+// Avaruuslennon ratamekaniikka: Keplerin radan eteneminen, Lambertin ongelma ja ratamuutosten Δv.
+// Yksiköt: km, km/s ja sekunnit, ellei toisin mainita. Ajanhetket ovat millisekunteja (Date.getTime()).
+// Koordinaatit ovat Auringon keskisiä ekliptikan koordinaatteja (J2000) kuten planets.js:ssä.
+// Kaikki lasketaan selaimessa suljetuilla kaavoilla, joten aluksen paikka saadaan suoraan mille tahansa hetkelle
+// ilman askeltavaa integrointia, vaikka aikaa kiihdytettäisiin vuoden sekunnissa.
+
+import { AU_KM, PLANETS, elements, helioState } from './planets.js';
+
+/** Auringon gravitaatioparametri GM (km³/s²). */
+export const MU_SUN = 1.32712440018e11;
+const DAY_S = 86400;
+
+// Planeettojen gravitaatioparametrit (km³/s²) ja kiertoradat, joilla alus pysäköidään: [perikeskuksen ja apokeskuksen korkeus km].
+// Maapallon läheiset planeetat kierretään matalalla ympyräradalla. Jättiläisplaneetoilla kaapataan venyneelle radalle,
+// kuten luotaimet tekevät, koska matalalle ympyräradalle jarruttaminen veisi kymmeniä km/s.
+const BODIES = {
+  Merkurius: {mu:22031.86, orbit:[200,200]},
+  Venus: {mu:324858.59, orbit:[300,300]},
+  Maa: {mu:398600.44, orbit:[200,200]},
+  Mars: {mu:42828.37, orbit:[300,300]},
+  Jupiter: {mu:126686531.9, orbit:[70000,2000000]},
+  Saturnus: {mu:37931206.2, orbit:[60000,1500000]},
+  Uranus: {mu:5793951.3, orbit:[25000,500000]},
+  Neptunus: {mu:6835099.5, orbit:[25000,500000]},
+};
+
+/**
+ * Planeettojen tiedot lentoa varten: säde, μ, vaikutuspiirin (SOI) säde a·(μ/μ☉)^(2/5) ja pysäköintirata (km).
+ * Vaikutuspiirin sisällä aluksen liikettä hallitsee planeetan painovoima, sen ulkopuolella Auringon.
+ */
+export const FLIGHT_BODIES = Object.fromEntries(PLANETS.map(p=>{
+  const {mu,orbit}=BODIES[p.name], a=elements(p.name,Date.UTC(2000,0,1,12)).a*AU_KM;
+  return [p.name, {name:p.name, radiusKm:p.radiusKm, mu, soiKm:a*(mu/MU_SUN)**0.4,
+    periKm:p.radiusKm+orbit[0], apoKm:p.radiusKm+orbit[1]}];
+}));
+
+const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const scale = (a, k) => [a[0]*k, a[1]*k, a[2]*k];
+export const dot = (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+export const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+export const norm = a => Math.hypot(a[0], a[1], a[2]);
+
+/** Planeetan paikka (km) ja nopeus (km/s) Auringon ympärillä hetkellä time (ms). */
+export function planetState(name, time) {
+  const {pos,vel}=helioState(name,time);
+  return {r:scale(pos,AU_KM), v:scale(vel,AU_KM/DAY_S)};
+}
+
+// Stumpffin funktiot C(z) ja S(z); pienillä z:n arvoilla sarjakehitelmä välttää kumoutumisen.
+function stumpff(z) {
+  if(z>1e-6) {const s=Math.sqrt(z); return [(1-Math.cos(s))/z, (s-Math.sin(s))/(s*z)];}
+  if(z<-1e-6) {const s=Math.sqrt(-z); return [(Math.cosh(s)-1)/-z, (Math.sinh(s)-s)/(s*-z)];}
+  return [1/2-z/24+z*z/720, 1/6-z/120+z*z/5040];
+}
+
+/**
+ * Keplerin radan eteneminen universaalimuuttujalla: paikka r ja nopeus v ajan dt (s) kuluttua alkutilasta (r0, v0).
+ * Toimii ellipsillä, paraabelilla ja hyperbelillä sekä taaksepäin (dt < 0). Universaalin Keplerin yhtälön
+ * ratkaisuun käytetään Laguerren–Conwayn menetelmää, joka suppenee luotettavasti myös huonoista alkuarvauksista.
+ */
+export function propagate(r0, v0, dt, mu = MU_SUN) {
+  const rn=norm(r0), vr=dot(r0,v0)/rn, alpha=2/rn-dot(v0,v0)/mu, sqmu=Math.sqrt(mu);
+  // Ellipsillä kokonaiset kierrokset voi jättää pois, mikä pitää vuosikymmenien etenemisen tarkkana.
+  if(alpha>1e-12) {
+    const period=2*Math.PI/Math.sqrt(mu*alpha**3);
+    dt-=Math.round(dt/period)*period;
+  }
+  if(dt===0) return {r:[...r0], v:[...v0]};
+  // Alkuarvaus: ellipsillä keskiliike, hyperbelillä ja paraabelilla logaritminen arvio (Vallado).
+  let x;
+  if(alpha>1e-12) x=sqmu*dt*alpha;
+  else if(alpha<-1e-12) {
+    const a=1/alpha, sg=Math.sign(dt);
+    x=sg*Math.sqrt(-a)*Math.log((-2*mu*alpha*dt)/(dot(r0,v0)+sg*Math.sqrt(-mu*a)*(1-rn*alpha)));
+    if(!Number.isFinite(x)) x=sqmu*dt/rn;
+  } else x=sqmu*dt/rn;
+  const k=rn*vr/sqmu;
+  for(let i=0;i<100;i++) {
+    const z=alpha*x*x, [C,S]=stumpff(z);
+    const F=k*x*x*C+(1-alpha*rn)*x**3*S+rn*x-sqmu*dt;
+    const dF=k*x*(1-z*S)+(1-alpha*rn)*x*x*C+rn;
+    const ddF=k*(1-z*C)+(1-alpha*rn)*x*(1-z*S);
+    const n=5, root=Math.sqrt(Math.abs((n-1)**2*dF*dF-n*(n-1)*F*ddF));
+    const dx=n*F/(dF+Math.sign(dF)*root);
+    x-=dx;
+    if(Math.abs(dx)<1e-10*Math.max(1,Math.abs(x))) break;
+  }
+  const z=alpha*x*x, [C,S]=stumpff(z);
+  const f=1-x*x/rn*C, g=dt-x**3/sqmu*S;
+  const r=add(scale(r0,f),scale(v0,g)), r1=norm(r);
+  const fd=sqmu/(r1*rn)*(alpha*x**3*S-x), gd=1-x*x/r1*C;
+  return {r, v:add(scale(r0,fd),scale(v0,gd))};
+}
+
+/**
+ * Lambertin ongelma: siirtorata, joka kulkee paikasta r1 paikkaan r2 ajassa tof (s). Rata kiertää planeettojen
+ * suuntaan (ekliptikan pohjoisnavalta katsoen vastapäivään) alle yhden kierroksen.
+ * Palauttaa nopeudet v1 lähtöpisteessä ja v2 saapumispisteessä (km/s) tai null, jos ratkaisua ei löydy.
+ * Universaalimuuttujan z ratkaisu haetaan puolitushaulla, koska lentoaika kasvaa z:n mukana monotonisesti.
+ */
+export function lambert(r1, r2, tof, mu = MU_SUN) {
+  const n1=norm(r1), n2=norm(r2);
+  let dtheta=Math.acos(Math.max(-1,Math.min(1,dot(r1,r2)/(n1*n2))));
+  if(cross(r1,r2)[2]<0) dtheta=2*Math.PI-dtheta;
+  const A=Math.sin(dtheta)*Math.sqrt(n1*n2/(1-Math.cos(dtheta)));
+  if(!(tof>0) || !Number.isFinite(A) || Math.abs(A)<1e-9) return null;
+  const sqmu=Math.sqrt(mu);
+  const yOf=z=>{const [C,S]=stumpff(z); return n1+n2+A*(z*S-1)/Math.sqrt(C);};
+  const tofOf=z=>{
+    const [C,S]=stumpff(z), y=n1+n2+A*(z*S-1)/Math.sqrt(C);
+    if(y<0) return -Infinity;
+    return ((y/C)**1.5*S+A*Math.sqrt(y))/sqmu;
+  };
+  let lo=-4*Math.PI**2, hi=4*Math.PI**2*(1-1e-12);
+  for(let i=0;i<60 && tofOf(lo)>tof;i++) lo*=2;
+  if(tofOf(lo)>tof) return null;
+  for(let i=0;i<200;i++) {
+    const mid=(lo+hi)/2;
+    if(tofOf(mid)<tof) lo=mid; else hi=mid;
+    if(hi-lo<1e-13*Math.max(1,Math.abs(mid))) break;
+  }
+  const y=yOf((lo+hi)/2);
+  const f=1-y/n1, g=A*Math.sqrt(y/mu), gd=1-y/n2;
+  return {v1:scale(sub(r2,scale(r1,f)),1/g), v2:scale(sub(scale(r2,gd),r1),1/g)};
+}
+
+/** Ominaisenergia ja liikemäärämomentti (radan säilyvät suureet). */
+export function invariants(r, v, mu = MU_SUN) {
+  return {energy:dot(v,v)/2-mu/norm(r), h:cross(r,v)};
+}
+
+/**
+ * Polton Δv (km/s) planeetan pysäköintiradan ja Auringon ympäri kulkevan radan välillä, kun ylinopeus
+ * planeetan suhteen on vinf (km/s). Poltto tehdään radan perikeskuksessa: Δv = √(v∞² + 2μ/r) − v_rata.
+ * Sama kaava pätee lähtöön ja saapumiseen (kaappaukseen).
+ */
+export function burnDv(body, vinf, orbit = FLIGHT_BODIES[body]) {
+  const {mu,periKm,apoKm}=orbit;
+  const vOrbit=Math.sqrt(mu*(2/periKm-2/(periKm+apoKm)));
+  return Math.sqrt(vinf*vinf+2*mu/periKm)-vOrbit;
+}
+
+/**
+ * Siirtolento planeetalta toiselle: lähtö hetkellä depart (ms), lentoaika tofDays vuorokautta.
+ * Palauttaa siirtoradan alkutilan, ylinopeudet ja polttojen Δv:t tai null, jos Lambertin ratkaisua ei löydy.
+ */
+export function transfer(from, to, depart, tofDays) {
+  const arrive=depart+tofDays*DAY_S*1000;
+  const a=planetState(from,depart), b=planetState(to,arrive);
+  const sol=lambert(a.r,b.r,tofDays*DAY_S);
+  if(!sol) return null;
+  const vinfDep=norm(sub(sol.v1,a.v)), vinfArr=norm(sub(sol.v2,b.v));
+  const dvDep=burnDv(from,vinfDep), dvArr=burnDv(to,vinfArr);
+  return {from, to, depart, arrive, r1:a.r, v1:sol.v1, r2:b.r, v2:sol.v2,
+    vinfDep, vinfArr, dvDep, dvArr, dvTotal:dvDep+dvArr};
+}
+
+/** Aluksen paikka ja nopeus siirtoradalla hetkellä time (ms). */
+export function shipState(tr, time) {
+  return propagate(tr.r1, tr.v1, (time-tr.depart)/1000);
+}
+
+/** Hohmannin siirto ympyräratojen r1 ja r2 välillä: lentoaika (s) ja ylinopeudet lähdössä ja saapumisessa (km/s). */
+export function hohmann(r1, r2, mu = MU_SUN) {
+  const a=(r1+r2)/2;
+  return {
+    tof:Math.PI*Math.sqrt(a**3/mu),
+    vinfDep:Math.abs(Math.sqrt(mu*(2/r1-1/a))-Math.sqrt(mu/r1)),
+    vinfArr:Math.abs(Math.sqrt(mu/r2)-Math.sqrt(mu*(2/r2-1/a))),
+  };
+}

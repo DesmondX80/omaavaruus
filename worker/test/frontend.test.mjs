@@ -212,3 +212,107 @@ describe("aurinkokunnan kartta", async () => {
     }
   });
 });
+
+describe("avaruuslennon ratamekaniikka", async () => {
+  const { helio, helioState, PLANETS, AU_KM } = await import("../../frontend/js/planets.js");
+  const F = await import("../../frontend/js/flight.js");
+  const Astronomy = await import("astronomy-engine");
+  const BODIES = { Merkurius: "Mercury", Venus: "Venus", Maa: "EMB", Mars: "Mars", Jupiter: "Jupiter", Saturnus: "Saturn", Uranus: "Uranus", Neptunus: "Neptune" };
+  const toEcliptic = Astronomy.Rotation_EQJ_ECL();
+  const close = (a, b, tol) => F.norm([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) / F.norm(b) < tol;
+
+  it("Standishin pitkän aikavälin alkiot pitävät sijainnit tarkkoina vuosisadan päähän", () => {
+    for (const iso of ["1850-01-01T00:00:00Z", "2026-11-14T00:00:00Z", "2075-06-01T00:00:00Z", "2150-01-01T00:00:00Z"]) {
+      const time = Date.parse(iso);
+      for (const { name } of PLANETS) {
+        const v = Astronomy.RotateVector(toEcliptic, Astronomy.HelioVector(Astronomy.Body[BODIES[name]], new Date(time)));
+        const [x, y, z] = helio(name, time);
+        const arcmin = (Math.hypot(x - v.x, y - v.y, z - v.z) / Math.hypot(v.x, v.y, v.z)) * (180 / Math.PI) * 60;
+        expect(arcmin, `${name} ${iso}`).toBeLessThan(15);
+      }
+    }
+  });
+
+  it("planeettojen nopeusvektorit vastaavat astronomy-enginen laskemia", () => {
+    const time = Date.parse("2026-11-14T00:00:00Z");
+    for (const { name } of PLANETS) {
+      const s = Astronomy.HelioState(Astronomy.Body[BODIES[name]], new Date(time));
+      const v = Astronomy.RotateVector(toEcliptic, new Astronomy.Vector(s.vx, s.vy, s.vz, s.t));
+      expect(close(helioState(name, time).vel, [v.x, v.y, v.z], 0.01), name).toBe(true);
+    }
+    // Maan ratanopeus on noin 29,8 km/s.
+    expect(F.norm(F.planetState("Maa", time).v)).toBeCloseTo(29.8, 0);
+  });
+
+  it("radan eteneminen säilyttää energian ja liikemäärämomentin", () => {
+    const r0 = [AU_KM, 0, 0];
+    for (const [v0, dt] of [
+      [[0, 30, 1], 200 * 86400], // lähes ympyrärata
+      [[5, 38, 2], 3 * 365 * 86400], // venynyt ellipsi
+      [[0, 38, 0], 40 * 365 * 86400], // monta kierrosta
+      [[10, 45, 3], 5 * 365 * 86400], // hyperbeli
+      [[0, 30, 0], -150 * 86400], // taaksepäin
+    ]) {
+      const a = F.invariants(r0, v0), { r, v } = F.propagate(r0, v0, dt), b = F.invariants(r, v);
+      expect(Math.abs(b.energy / a.energy - 1), `${v0} ${dt}`).toBeLessThan(1e-9);
+      expect(close(b.h, a.h, 1e-9), `${v0} ${dt}`).toBe(true);
+      // Eteneminen takaisin palauttaa alkutilan.
+      expect(close(F.propagate(r, v, -dt).r, r0, 1e-8), `${v0} ${dt}`).toBe(true);
+    }
+    // Ympyrärata palaa kierroksen jälkeen alkuun.
+    const vc = Math.sqrt(F.MU_SUN / AU_KM), period = 2 * Math.PI * Math.sqrt(AU_KM ** 3 / F.MU_SUN);
+    expect(close(F.propagate(r0, [0, vc, 0], period / 4).r, [0, AU_KM, 0], 1e-9)).toBe(true);
+  });
+
+  it("Lambertin ratkaisu toistaa annetun loppupisteen", () => {
+    const r1 = [AU_KM, 0, 0];
+    for (const [r2, days] of [
+      [[0, 1.5 * AU_KM, 0.05 * AU_KM], 150],
+      [[-1.2 * AU_KM, 0.3 * AU_KM, 0], 300],
+      [[0.2 * AU_KM, -1.4 * AU_KM, 0], 400], // pitkä kaari
+      [[0.5 * AU_KM, 0.5 * AU_KM, 0], 20], // hyperbolinen pikalento
+      [[-5 * AU_KM, 1 * AU_KM, 0.1 * AU_KM], 1000],
+    ]) {
+      const sol = F.lambert(r1, r2, days * 86400);
+      expect(sol, `${r2}`).not.toBeNull();
+      const end = F.propagate(r1, sol.v1, days * 86400);
+      expect(close(end.r, r2, 1e-7), `${r2} ${days}`).toBe(true);
+      expect(close(end.v, sol.v2, 1e-7), `${r2} ${days}`).toBe(true);
+      // Rata kulkee planeettojen suuntaan.
+      expect(F.cross(r1, sol.v1)[2]).toBeGreaterThan(0);
+    }
+  });
+
+  it("Maa→Mars Hohmann kestää noin 259 vrk ja lähtö LEO:sta vaatii noin 3,6 km/s", () => {
+    const h = F.hohmann(AU_KM, 1.524 * AU_KM);
+    expect(h.tof / 86400).toBeCloseTo(259, 0);
+    expect(F.burnDv("Maa", h.vinfDep)).toBeCloseTo(3.6, 1);
+    // Lähes 180° siirto Lambertilla vastaa Hohmannia.
+    const sol = F.lambert([AU_KM, 0, 0], [-1.524 * AU_KM, 1e-3 * AU_KM, 0], h.tof);
+    expect(F.norm(sol.v1) - Math.sqrt(F.MU_SUN / AU_KM)).toBeCloseTo(h.vinfDep, 2);
+  });
+
+  it("löytää vuoden 2026 Mars-ikkunan oikeilla planeettojen paikoilla", () => {
+    let best = null;
+    for (let d = Date.parse("2026-09-01T00:00:00Z"); d < Date.parse("2027-03-01T00:00:00Z"); d += 5 * 86400000) {
+      for (let tof = 150; tof <= 400; tof += 10) {
+        const tr = F.transfer("Maa", "Mars", d, tof);
+        if (tr && (!best || tr.dvDep < best.dvDep)) best = tr;
+      }
+    }
+    // Halvin lähtö on vuodenvaihteen tienoilla, ja Δv LEO:sta on Hohmannin luokkaa.
+    expect(best.dvDep).toBeGreaterThan(3.4);
+    expect(best.dvDep).toBeLessThan(4);
+    expect(best.depart).toBeGreaterThan(Date.parse("2026-10-01T00:00:00Z"));
+    expect(best.depart).toBeLessThan(Date.parse("2027-02-01T00:00:00Z"));
+    // Alus saapuu Marsin luo siirtoradan päässä.
+    const end = F.shipState(best, best.arrive);
+    expect(F.norm([end.r[0] - best.r2[0], end.r[1] - best.r2[1], end.r[2] - best.r2[2]])).toBeLessThan(1000);
+  });
+
+  it("vaikutuspiirien säteet ovat oikeaa suuruusluokkaa", () => {
+    expect(F.FLIGHT_BODIES.Maa.soiKm / 1e6).toBeCloseTo(0.925, 1);
+    expect(F.FLIGHT_BODIES.Jupiter.soiKm / 1e6).toBeCloseTo(48.2, 0);
+    expect(F.FLIGHT_BODIES.Mars.soiKm / 1e6).toBeCloseTo(0.577, 1);
+  });
+});
