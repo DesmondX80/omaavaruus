@@ -9,12 +9,16 @@ import { AU_KM, PLANETS, elements, helioState } from './planets.js';
 /** Auringon gravitaatioparametri GM (km³/s²). */
 export const MU_SUN = 1.32712440018e11;
 const DAY_S = 86400;
+const DAY_MS = DAY_S*1000;
+/** Raketin Δv-budjetti (km/s) yhdelle lennolle; polttoaine täydentyy, kun planeetta on tutkittu. */
+export const FUEL_KMS = 14;
 
 // Planeettojen gravitaatioparametrit (km³/s²) ja kiertoradat, joilla alus pysäköidään: [perikeskuksen ja apokeskuksen korkeus km].
-// Maapallon läheiset planeetat kierretään matalalla ympyräradalla. Jättiläisplaneetoilla kaapataan venyneelle radalle,
+// Venus, Maa ja Mars kierretään matalalla ympyräradalla. Merkuriukselle saavutaan Auringon läheltä suurella
+// ylinopeudella, joten sen kaappausrata on hieman venynyt. Jättiläisplaneetoilla kaapataan venyneelle radalle,
 // kuten luotaimet tekevät, koska matalalle ympyräradalle jarruttaminen veisi kymmeniä km/s.
 const BODIES = {
-  Merkurius: {mu:22031.86, orbit:[200,200]},
+  Merkurius: {mu:22031.86, orbit:[200,10000]},
   Venus: {mu:324858.59, orbit:[300,300]},
   Maa: {mu:398600.44, orbit:[200,200]},
   Mars: {mu:42828.37, orbit:[300,300]},
@@ -169,4 +173,76 @@ export function hohmann(r1, r2, mu = MU_SUN) {
     vinfDep:Math.abs(Math.sqrt(mu*(2/r1-1/a))-Math.sqrt(mu/r1)),
     vinfArr:Math.abs(Math.sqrt(mu/r2)-Math.sqrt(mu*(2/r2-1/a))),
   };
+}
+
+// Hakuruudukko: lähtöpäiviä ja lentoaikoja. Ulkoplaneetoille ruudukko harvenee, koska lentoaika on pitkä
+// ja ikkuna leveä.
+const DEP_STEPS = 150, TOF_STEPS = 40;
+
+// Kuvioetsintä (pattern search) ruudukon parhaan pisteen ympäriltä: askelta puolitetaan, kunnes se on alle tunnin.
+function refine(cost, dep, tof, dStep, tStep) {
+  let best=cost(dep,tof);
+  while(dStep>1/24 || tStep>1/24) {
+    let moved=false;
+    for(const [dd,dt] of [[dStep,0],[-dStep,0],[0,tStep],[0,-tStep],[dStep,tStep],[-dStep,-tStep],[dStep,-tStep],[-dStep,tStep]]) {
+      const c=cost(dep+dd,tof+dt);
+      if(c<best) {best=c; dep+=dd; tof+=dt; moved=true; break;}
+    }
+    if(!moved) {dStep/=2; tStep/=2;}
+  }
+  return [dep,tof];
+}
+
+/**
+ * Laukaisuikkunoiden haku planeetalta from planeetalle to alkaen hetkestä start (ms), days vuorokauden ajalta.
+ * Generaattori: jokainen next() laskee yhden lähtöpäivän rivin ja antaa edistymisen (0–1), jotta käyttöliittymä
+ * ehtii piirtää välissä. Lopuksi palautetaan vaihtoehdot halvimmasta alkaen:
+ * halvin, nopeampi (lentoaika enintään 70 % halvimman lentoajasta) ja aikaisin perillä polttoaineella fuel.
+ */
+export function* windowSearch(from, to, start, {days = 730, fuel = FUEL_KMS} = {}) {
+  const a1=elements(from,start).a*AU_KM, a2=elements(to,start).a*AU_KM;
+  const th=hohmann(a1,a2).tof/DAY_S;
+  const tofMin=Math.max(20,th*0.35), tofMax=th*1.15;
+  const dStep=days/DEP_STEPS, tStep=(tofMax-tofMin)/TOF_STEPS;
+  const grid=[];
+  for(let i=0;i<=DEP_STEPS;i++) {
+    for(let j=0;j<=TOF_STEPS;j++) {
+      const dep=i*dStep, tof=tofMin+j*tStep, tr=transfer(from,to,start+dep*DAY_MS,tof);
+      if(tr) grid.push({dep, tof, cost:tr.dvTotal});
+    }
+    yield i/DEP_STEPS;
+  }
+  if(!grid.length) return [];
+  // Kustannusfunktiot vuorokausina lähtöhetkestä; rajojen ulkopuoliset ja ratkeamattomat pisteet ovat äärettömiä.
+  const at=(dep,tof)=>dep<0||dep>days||tof<tofMin||tof>tofMax ? null : transfer(from,to,start+dep*DAY_MS,tof);
+  const pick=(points, cost)=>{
+    if(!points.length) return null;
+    const p=points.reduce((b,q)=>cost(q.dep,q.tof)<cost(b.dep,b.tof) ? q : b);
+    if(!Number.isFinite(cost(p.dep,p.tof))) return null;
+    const [dep,tof]=refine(cost,p.dep,p.tof,dStep,tStep);
+    return at(dep,tof);
+  };
+  const dv=(dep,tof)=>at(dep,tof)?.dvTotal ?? Infinity;
+  const cheapest=pick(grid,(dep,tof)=>dv(dep,tof));
+  if(!cheapest) return [];
+  const limit=0.7*(cheapest.arrive-cheapest.depart)/DAY_MS;
+  const faster=pick(grid.filter(p=>p.tof<=limit),(dep,tof)=>tof>limit ? Infinity : dv(dep,tof));
+  const earliest=pick(grid.filter(p=>p.cost<=fuel),(dep,tof)=>dv(dep,tof)<=fuel ? dep+tof : Infinity);
+  const options=[{kind:'cheapest', ...cheapest}];
+  if(faster) options.push({kind:'faster', ...faster});
+  // Aikaisin perille ehtivä vaihtoehto näytetään vain, jos se eroaa muista selvästi.
+  if(earliest && options.every(o=>Math.abs(o.arrive-earliest.arrive)>5*DAY_MS)) options.push({kind:'earliest', ...earliest});
+  return options.map(o=>({...o, fuelOk:o.dvTotal<=fuel}));
+}
+
+/** Ajaa ikkunahaun loppuun kerralla (testit ja pienet haut). */
+export function findWindows(...args) {
+  const it=windowSearch(...args);
+  for(;;) {const r=it.next(); if(r.done) return r.value;}
+}
+
+/** Kesto muodossa 123 vrk 04:12:33. */
+export function fmtDuration(ms) {
+  const s=Math.max(0,Math.floor(ms/1000)), d=Math.floor(s/86400), p=n=>String(n).padStart(2,'0');
+  return `${d} vrk ${p(Math.floor(s/3600)%24)}:${p(Math.floor(s/60)%60)}:${p(s%60)}`;
 }

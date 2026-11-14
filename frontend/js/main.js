@@ -13,10 +13,11 @@ import { initPush, renderPush } from './push.js';
 import { initSheets } from './sheets.js';
 import { initSky, sky } from './sky.js';
 import { initSolarSystem } from './solarsystem.js';
+import { initVoyage } from './voyage.js';
 import { redrawMap, solarwind } from './solarwind.js';
 import { auroraHistory, renderCameras, sunStatus, weather } from './weather.js';
 
-initNight(); initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initSolarSystem(); initIss(); initNav();
+initNight(); initInfo(); initSheets(); initNow(); initCalendar(); initSky(); initSolarSystem(); initIss(); initNav(); initVoyage();
 setInterval(tickCountdowns,1000);
 el('time-offset').addEventListener('change',e=>{state.offset=Number(e.target.value); sky();});
 launches(); sunStatus();

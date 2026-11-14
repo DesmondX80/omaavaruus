@@ -316,3 +316,42 @@ describe("avaruuslennon ratamekaniikka", async () => {
     expect(F.FLIGHT_BODIES.Mars.soiKm / 1e6).toBeCloseTo(0.577, 1);
   });
 });
+
+describe("avaruuslennon laukaisuikkunat", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const start = Date.parse("2026-11-14T00:00:00Z"), DAY = 86400000;
+
+  it("löytää Maa→Mars-lennolle halvimman ja nopeamman vaihtoehdon", () => {
+    const it = F.windowSearch("Maa", "Mars", start);
+    let r, last = -1;
+    while (!(r = it.next()).done) {
+      expect(r.value).toBeGreaterThan(last);
+      last = r.value;
+    }
+    expect(last).toBe(1);
+    const [cheapest, faster] = r.value;
+    expect(cheapest.kind).toBe("cheapest");
+    expect(cheapest.dvTotal).toBeLessThan(6.5);
+    expect(cheapest.fuelOk).toBe(true);
+    expect(faster.kind).toBe("faster");
+    expect(faster.arrive - faster.depart).toBeLessThanOrEqual(0.7 * (cheapest.arrive - cheapest.depart) + DAY);
+    expect(faster.dvTotal).toBeGreaterThan(cheapest.dvTotal);
+    for (const o of r.value) {
+      expect(o.depart).toBeGreaterThanOrEqual(start);
+      expect(o.depart).toBeLessThanOrEqual(start + 731 * DAY);
+    }
+  });
+
+  it("pitää ulkoplaneettojen lentoajan kohtuullisena ja kertoo, riittääkö polttoaine", () => {
+    const [cheapest] = F.findWindows("Maa", "Neptunus", start);
+    expect((cheapest.arrive - cheapest.depart) / DAY / 365.25).toBeLessThan(36);
+    expect(cheapest.fuelOk).toBe(true);
+    const poor = F.findWindows("Maa", "Jupiter", start, { fuel: 5 });
+    expect(poor.every((o) => !o.fuelOk)).toBe(true);
+  });
+
+  it("muotoilee lentoajan kelloksi", () => {
+    expect(F.fmtDuration(123 * DAY + 4 * 3600000 + 12 * 60000 + 33500)).toBe("123 vrk 04:12:33");
+    expect(F.fmtDuration(-5)).toBe("0 vrk 00:00:00");
+  });
+});
