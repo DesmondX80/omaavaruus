@@ -476,3 +476,61 @@ describe("avaruuslennon kurssikorjaukset", async () => {
     expect(F.dot(F.burnVector(s, "retrograde", 1), pro)).toBeCloseTo(-1, 10);
   });
 });
+
+describe("avaruuslennon linkoukset, kuut ja alukset", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const { PLANET_INFO } = await import("../../frontend/js/planetinfo.js");
+  const start = Date.parse("2026-11-14T00:00:00Z"), DAY = 86400000;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+
+  it("ohilento kääntää ylinopeutta vain fysikaalisesti mahdollisen määrän", () => {
+    // Pieni käännös onnistuu ilman polttoa, kun nopeus säilyy.
+    const ok = F.flybyDv("Jupiter", [10, 0, 0], [10 * Math.cos(0.5), 10 * Math.sin(0.5), 0]);
+    expect(ok.dv).toBeCloseTo(0, 10);
+    expect(ok.rp).toBeGreaterThan(F.FLIGHT_BODIES.Jupiter.radiusKm);
+    // Täyskäännös vaatisi perikeskuksen planeetan sisällä.
+    expect(F.flybyDv("Mars", [5, 0, 0], [-5, 0, 0])).toBeNull();
+    // Nopeuden muutos poltetaan perikeskuksessa.
+    expect(F.flybyDv("Jupiter", [10, 0, 0], [11, 0.1, 0]).dv).toBeGreaterThan(0);
+  });
+
+  it("ehdottaa Merkuriukseen Venus-linkousta, jonka osuudet kohtaavat ja joka on suoraa lentoa halvempi", () => {
+    const options = F.findWindows("Maa", "Merkurius", start);
+    const tr = options.find((o) => o.kind === "assist");
+    expect(tr?.via).toBe("Venus");
+    expect(tr.dvTotal).toBeLessThan(options[0].dvTotal);
+    expect(tr.dvTotal).toBeCloseTo(tr.dvDep + tr.dvFlyby + tr.dvArr, 10);
+    const at = F.shipState(tr, tr.flyby.t), venus = F.planetState("Venus", tr.flyby.t);
+    expect(F.norm(sub(at.r, venus.r))).toBeLessThan(10);
+    expect(F.norm(sub(F.shipState(tr, tr.arrive).r, F.planetState("Merkurius", tr.arrive).r))).toBeLessThan(10);
+    // Ohjaamossa alus ohittaa Venuksen sen ulkopuolelta.
+    expect(F.norm(sub(F.shipView(tr, tr.flyby.t).r, venus.r))).toBeGreaterThan(F.FLIGHT_BODIES.Venus.radiusKm);
+  }, 20000);
+
+  it("lentää kuuhun emoplaneetan kiertoradalta ja takaisin", () => {
+    const go = F.localTransfer("Maa", "Kuu", start);
+    // Kuulento: noin 5 vrk, lähtö noin 3,1 km/s ja jarrutus noin 0,8 km/s.
+    expect((go.arrive - go.depart) / DAY).toBeCloseTo(5, 0);
+    expect(go.dvDep).toBeCloseTo(3.1, 1);
+    expect(go.dvArr).toBeCloseTo(0.8, 1);
+    expect(F.norm(sub(F.shipState(go, go.arrive).r, F.bodyState("Kuu", go.arrive).r))).toBeLessThan(1);
+    const back = F.localTransfer("Kuu", "Maa", start);
+    expect(F.norm(sub(F.shipState(back, back.depart).r, F.bodyState("Kuu", back.depart).r))).toBeLessThan(1);
+    expect(back.dvTotal).toBeCloseTo(go.dvTotal, 6);
+    // Ohjaamossa alus ei ole kuun sisällä.
+    expect(F.norm(sub(F.shipView(go, go.arrive).r, F.bodyState("Kuu", go.arrive).r))).toBeGreaterThanOrEqual(F.orbitOf("Kuu").periKm - 1);
+    for (const m of Object.keys(F.MOONS)) expect(PLANET_INFO[m]?.facts.length, m).toBeGreaterThanOrEqual(2);
+  });
+
+  it("ionialuksen lähtö on spiraali, joka ehtii ennen lähtöhetkeä", () => {
+    const options = F.findWindows("Maa", "Mars", start, { ship: "ioni", fuel: F.SHIPS.ioni.fuel });
+    expect(options.every((o) => o.kind !== "assist")).toBe(true);
+    for (const o of options) {
+      expect(o.spiralOut).toBeGreaterThan(30 * DAY);
+      expect(o.depart - o.spiralOut).toBeGreaterThanOrEqual(start);
+    }
+    expect(F.canRefuel("ydin", "Mars")).toBe(false);
+    expect(F.canRefuel("ydin", "Jupiter")).toBe(true);
+    expect(F.canRefuel("kemiallinen", "Mars")).toBe(true);
+  });
+});

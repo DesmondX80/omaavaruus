@@ -75,3 +75,32 @@ export const PLANET_INFO = {
     ],
   },
 };
+
+// Kuut: kiertoaika on samalla kuun vuorokausi, koska kaikki nämä kuut kääntävät aina saman puolen planeettaansa kohti.
+const moon = (parent, orbit, rest) => ({parent, orbit, day:'sama kuin kiertoaika (sidottu kierto)', moons:'–', ...rest});
+Object.assign(PLANET_INFO, {
+  Kuu: moon('Maa','384 400 km Maasta, kierros 27,3 vrk',{
+    diameter:'3 474 km', mass:'0,012 × Maa', gravity:'1,62 m/s² (0,17 g)', temperature:'−173…+127 °C', atmosphere:'ei kaasukehää',
+    facts:['Kuu kääntää aina saman puolen Maata kohti.','Apollo-ohjelmassa 12 ihmistä käveli Kuussa vuosina 1969–1972.','Kuu loittonee Maasta noin 3,8 cm vuodessa.']}),
+  Phobos: moon('Mars','9 376 km Marsin keskipisteestä, kierros 7 h 39 min',{
+    diameter:'noin 22 km (epäsäännöllinen)', mass:'1,1 × 10¹⁶ kg', gravity:'0,006 m/s²', temperature:'−112…−4 °C', atmosphere:'ei kaasukehää',
+    facts:['Phobos kiertää Marsin nopeammin kuin Mars pyörii, joten Marsista katsottuna se nousee lännestä.','Se lähestyy Marsia ja hajoaa renkaaksi tai törmää planeettaan kymmenien miljoonien vuosien kuluttua.','Stickney-kraatteri on noin 9 km leveä, lähes puolet kuun läpimitasta.']}),
+  Io: moon('Jupiter','421 700 km Jupiterista, kierros 1,8 vrk',{
+    diameter:'3 643 km', mass:'0,015 × Maa', gravity:'1,80 m/s² (0,18 g)', temperature:'keskimäärin −130 °C, laavat yli +1 000 °C', atmosphere:'ohut, rikkidioksidia',
+    facts:['Aurinkokunnan tuliperäisin kappale: yli 400 aktiivista tulivuorta.','Jupiterin vuorovesivoimat venyttävät Iota ja kuumentavat sen sisuksia.','Purkaukset sinkoavat ainetta satojen kilometrien korkeuteen.']}),
+  Europa: moon('Jupiter','671 000 km Jupiterista, kierros 3,6 vrk',{
+    diameter:'3 122 km', mass:'0,008 × Maa', gravity:'1,31 m/s² (0,13 g)', temperature:'noin −160 °C', atmosphere:'hyvin ohut, happea',
+    facts:['Jääkuoren alla on suolainen valtameri, jossa voi olla kaksi kertaa Maan merien vesimäärä.','NASAn Europa Clipper laukaistiin vuonna 2024 tutkimaan, voisiko meressä olla elämää.','Pinta on yksi aurinkokunnan sileimmistä.']}),
+  Ganymedes: moon('Jupiter','1 070 000 km Jupiterista, kierros 7,2 vrk',{
+    diameter:'5 268 km', mass:'0,025 × Maa', gravity:'1,43 m/s² (0,15 g)', temperature:'noin −160 °C', atmosphere:'hyvin ohut, happea',
+    facts:['Aurinkokunnan suurin kuu, läpimitaltaan suurempi kuin Merkurius.','Ainoa kuu, jolla on oma magneettikenttä ja siksi myös revontulia.','ESA:n JUICE-luotain saapuu Jupiterille vuonna 2031 ja asettuu lopulta Ganymedeen kiertoradalle.']}),
+  Titan: moon('Saturnus','1 222 000 km Saturnuksesta, kierros 16 vrk',{
+    diameter:'5 150 km', mass:'0,023 × Maa', gravity:'1,35 m/s² (0,14 g)', temperature:'noin −179 °C', atmosphere:'paksu: 95 % typpeä ja metaania, paine 1,5 kertaa Maan',
+    facts:['Ainoa kuu, jolla on paksu kaasukehä. Siellä sataa metaania, ja pinnalla on metaanijärviä.','Huygens-luotain laskeutui Titanille vuonna 2005.','NASAn Dragonfly-helikopteri on määrä lähettää lentämään Titanin kaasukehässä.']}),
+  Enceladus: moon('Saturnus','238 000 km Saturnuksesta, kierros 1,4 vrk',{
+    diameter:'504 km', mass:'1,1 × 10²⁰ kg', gravity:'0,11 m/s²', temperature:'noin −198 °C', atmosphere:'vesihöyryä geysireistä',
+    facts:['Etelänavan geysirit suihkuavat vettä avaruuteen ja ruokkivat Saturnuksen E-rengasta.','Jäinen pinta heijastaa lähes kaiken valon, joten Enceladus on aurinkokunnan kirkkaimpia kappaleita.','Cassini lensi suihkujen läpi ja löysi niistä suolaa ja orgaanisia yhdisteitä.']}),
+  Triton: moon('Neptunus','355 000 km Neptunuksesta, kierros 5,9 vrk takaperin',{
+    diameter:'2 707 km', mass:'0,004 × Maa', gravity:'0,78 m/s² (0,08 g)', temperature:'noin −235 °C', atmosphere:'hyvin ohut, typpeä',
+    facts:['Triton kiertää takaperin, joten se on luultavasti Neptunuksen kaappaama Kuiperin vyöhykkeen kappale.','Voyager 2 näki vuonna 1989 typpigeysirien jättämiä tummia juovia.','Vuorovesivoimat hidastavat Tritonia, ja se kiertyy hitaasti kohti Neptunusta.']}),
+});

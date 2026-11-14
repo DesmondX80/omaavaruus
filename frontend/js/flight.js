@@ -146,13 +146,40 @@ export function burnDv(body, vinf, orbit = FLIGHT_BODIES[body]) {
 }
 
 /**
+ * Alukset: Δv-budjetti (km/s), kiihtyvyys (km/s², null = hetkellinen poltto) ja planeetat, joilla voi tankata.
+ * Ydinlämpöraketti kuumentaa vetyä reaktorissa, joten sitä saa vain Maasta ja kaasujättiläisistä.
+ * Ionialuksen työntövoima on pieni: lähtö ja jarrutus ovat spiraaleja, jotka kestävät kuukausia.
+ */
+export const SHIPS = {
+  kemiallinen: {name:'Kemiallinen raketti', fuel:14, accel:null, refuel:null,
+    text:'Perusalus. Lähtö- ja jarrutuspoltot kestävät minuutteja.'},
+  ydin: {name:'Ydinlämpöraketti', fuel:22, accel:null, refuel:['Maa','Jupiter','Saturnus','Uranus','Neptunus'],
+    text:'Enemmän Δv:tä, mutta vetyä voi tankata vain Maassa ja kaasujättiläisillä.'},
+  ioni: {name:'Ionialus', fuel:45, accel:1e-6, refuel:null,
+    text:'Suuri Δv, mutta työntövoima on pieni (1 mm/s²): lähtö ja jarrutus ovat kuukausien spiraaleja, eikä linkousta voi tehdä.'},
+};
+export const canRefuel = (ship, body) => !SHIPS[ship].refuel || SHIPS[ship].refuel.includes(body);
+
+/**
+ * Polton hinta planeetan luona ylinopeudella vinf. Ionialus kiertää spiraalina ulos tai sisään, jolloin
+ * Edelbaumin likiarvon mukaan hinta on ympyräradan nopeus pysäköintiradan keskietäisyydellä ja ylinopeus.
+ */
+export function burnCost(ship, body, vinf) {
+  if(!SHIPS[ship].accel) return burnDv(body,vinf);
+  const {mu,periKm,apoKm}=FLIGHT_BODIES[body];
+  return Math.sqrt(mu/((periKm+apoKm)/2))+vinf;
+}
+/** Ionialuksen spiraalin kesto (ms) polton suuruudesta. */
+export const spiralMs = (ship, dvKms) => SHIPS[ship].accel ? dvKms/SHIPS[ship].accel*1000 : 0;
+
+/**
  * Lähtöpaikka on planeetan nimi (alus planeetan pysäköintiradalla) tai Auringon ympäri kulkeva rata
  * {r, v, t}, jolle alus jää, jos polttoaine ei riitä jarrutukseen kohteessa (ohilento).
  */
 export const isPlanet = from => typeof from==='string';
 /** Lähtöpaikan paikka ja nopeus Auringon ympärillä hetkellä time (ms). */
 export function departureState(from, time) {
-  return isPlanet(from) ? planetState(from,time) : propagate(from.r,from.v,(time-from.t)/1000);
+  return isPlanet(from) ? bodyState(from,time) : propagate(from.r,from.v,(time-from.t)/1000);
 }
 
 /**
@@ -160,21 +187,22 @@ export function departureState(from, time) {
  * Palauttaa siirtoradan alkutilan, ylinopeudet ja polttojen Δv:t tai null, jos Lambertin ratkaisua ei löydy.
  * Auringon kiertoradalta lähdettäessä poltto on suoraan nopeuksien erotus.
  */
-export function transfer(from, to, depart, tofDays) {
+export function transfer(from, to, depart, tofDays, ship = 'kemiallinen') {
   const arrive=depart+tofDays*DAY_S*1000;
   const a=departureState(from,depart), b=planetState(to,arrive);
   const sol=lambert(a.r,b.r,tofDays*DAY_S);
   if(!sol) return null;
   const vinfDep=norm(sub(sol.v1,a.v)), vinfArr=norm(sub(sol.v2,b.v));
-  const dvDep=isPlanet(from) ? burnDv(from,vinfDep) : vinfDep, dvArr=burnDv(to,vinfArr);
-  return {from, to, depart, arrive, r1:a.r, v1:sol.v1, r2:b.r, v2:sol.v2,
-    vinfDep, vinfArr, dvDep, dvArr, dvTotal:dvDep+dvArr};
+  const dvDep=isPlanet(from) ? burnCost(ship,from,vinfDep) : vinfDep, dvArr=burnCost(ship,to,vinfArr);
+  return {from, to, depart, arrive, r1:a.r, v1:sol.v1, r2:b.r, v2:sol.v2, ship,
+    vinfDep, vinfArr, dvDep, dvArr, dvTotal:dvDep+dvArr, spiralOut:isPlanet(from) ? spiralMs(ship,dvDep) : 0, spiralIn:spiralMs(ship,dvArr)};
 }
 
 /** Aluksen paikka ja nopeus siirtoradalla hetkellä time (ms). */
 // Kurssikorjausten jälkeen lennossa on osuuksia (legs: [{t, r, v}]); kullakin hetkellä käytetään viimeisintä
 // osuutta, joka on alkanut ennen sitä.
 export function shipState(tr, time) {
+  if(tr.local) return localState(tr,time);
   if(tr.legs) {
     let leg=tr.legs[0];
     for(const l of tr.legs) if(l.t<=time) leg=l;
@@ -199,16 +227,24 @@ const DEP_STEPS = 150, TOF_STEPS = 40;
 
 // Kuvioetsintä (pattern search) ruudukon parhaan pisteen ympäriltä: askelta puolitetaan, kunnes se on alle tunnin.
 function refine(cost, dep, tof, dStep, tStep) {
-  let best=cost(dep,tof);
-  while(dStep>1/24 || tStep>1/24) {
+  return refineN((x)=>cost(x[0],x[1]),[dep,tof],[dStep,tStep]);
+}
+// Sama n-ulotteisena (linkousreitit: lähtö ja kaksi lentoaikaa). Kokeillaan akselien ja lävistäjien suuntia.
+function refineN(cost, x, steps) {
+  x=[...x]; steps=[...steps];
+  let best=cost(x);
+  const dirs=[];
+  for(let i=0;i<x.length;i++) for(const s of [1,-1]) {const d=x.map(()=>0); d[i]=s; dirs.push(d);}
+  for(let i=0;i<x.length;i++) for(let j=i+1;j<x.length;j++) for(const [a,b] of [[1,1],[-1,-1],[1,-1],[-1,1]]) {const d=x.map(()=>0); d[i]=a; d[j]=b; dirs.push(d);}
+  while(steps.some(v=>v>1/24)) {
     let moved=false;
-    for(const [dd,dt] of [[dStep,0],[-dStep,0],[0,tStep],[0,-tStep],[dStep,tStep],[-dStep,-tStep],[dStep,-tStep],[-dStep,tStep]]) {
-      const c=cost(dep+dd,tof+dt);
-      if(c<best) {best=c; dep+=dd; tof+=dt; moved=true; break;}
+    for(const d of dirs) {
+      const y=x.map((v,i)=>v+d[i]*steps[i]), c=cost(y);
+      if(c<best) {best=c; x=y; moved=true; break;}
     }
-    if(!moved) {dStep/=2; tStep/=2;}
+    if(!moved) steps=steps.map(v=>v/2);
   }
-  return [dep,tof];
+  return x;
 }
 
 /**
@@ -217,7 +253,7 @@ function refine(cost, dep, tof, dStep, tStep) {
  * ehtii piirtää välissä. Lopuksi palautetaan vaihtoehdot halvimmasta alkaen:
  * halvin, nopeampi (lentoaika enintään 70 % halvimman lentoajasta) ja aikaisin perillä polttoaineella fuel.
  */
-export function* windowSearch(from, to, start, {days = 730, fuel = FUEL_KMS} = {}) {
+export function* windowSearch(from, to, start, {days = 730, fuel = FUEL_KMS, ship = 'kemiallinen', assists = true} = {}) {
   // Hohmannin lentoaika antaa haun mittakaavan; Auringon kiertoradalla isoakselin puolikas saadaan energiasta.
   const a1=isPlanet(from) ? elements(from,start).a*AU_KM : (s=>{const e=invariants(s.r,s.v).energy; return e<0 ? -MU_SUN/(2*e) : norm(s.r);})(departureState(from,start));
   const a2=elements(to,start).a*AU_KM;
@@ -227,14 +263,19 @@ export function* windowSearch(from, to, start, {days = 730, fuel = FUEL_KMS} = {
   const grid=[];
   for(let i=0;i<=DEP_STEPS;i++) {
     for(let j=0;j<=TOF_STEPS;j++) {
-      const dep=i*dStep, tof=tofMin+j*tStep, tr=transfer(from,to,start+dep*DAY_MS,tof);
-      if(tr) grid.push({dep, tof, cost:tr.dvTotal});
+      const dep=i*dStep, tof=tofMin+j*tStep, tr=transfer(from,to,start+dep*DAY_MS,tof,ship);
+      // Ionialuksen spiraalinousun täytyy ehtiä ennen lähtöä.
+      if(tr && tr.spiralOut<=dep*DAY_MS) grid.push({dep, tof, cost:tr.dvTotal});
     }
-    yield i/DEP_STEPS;
+    yield 0.4*i/DEP_STEPS;
   }
   if(!grid.length) return [];
   // Kustannusfunktiot vuorokausina lähtöhetkestä; rajojen ulkopuoliset ja ratkeamattomat pisteet ovat äärettömiä.
-  const at=(dep,tof)=>dep<0||dep>days||tof<tofMin||tof>tofMax ? null : transfer(from,to,start+dep*DAY_MS,tof);
+  const at=(dep,tof)=>{
+    if(dep<0||dep>days||tof<tofMin||tof>tofMax) return null;
+    const tr=transfer(from,to,start+dep*DAY_MS,tof,ship);
+    return tr && tr.spiralOut<=dep*DAY_MS ? tr : null;
+  };
   const pick=(points, cost)=>{
     if(!points.length) return null;
     const p=points.reduce((b,q)=>cost(q.dep,q.tof)<cost(b.dep,b.tof) ? q : b);
@@ -252,7 +293,80 @@ export function* windowSearch(from, to, start, {days = 730, fuel = FUEL_KMS} = {
   if(faster) options.push({kind:'faster', ...faster});
   // Aikaisin perille ehtivä vaihtoehto näytetään vain, jos se eroaa muista selvästi.
   if(earliest && options.every(o=>Math.abs(o.arrive-earliest.arrive)>5*DAY_MS)) options.push({kind:'earliest', ...earliest});
+  // Linkousreitti näytetään, jos se on halvin tai ehtii perille aiemmin kuin halvin suora lento.
+  if(assists && isPlanet(from) && !SHIPS[ship].accel) {
+    const assist=yield* assistSearch(from,to,start,{days,ship,progress:[0.4,1]});
+    if(assist && (assist.dvTotal<cheapest.dvTotal-0.05 || (assist.arrive<cheapest.arrive-30*DAY_MS && assist.dvTotal<=fuel)))
+      options.push({kind:'assist', ...assist});
+  }
   return options.map(o=>({...o, fuelOk:o.dvTotal<=fuel}));
+}
+
+// --- Painovoimalinkous ---
+
+/**
+ * Ohilennon hinta planeetan via ohi, kun tuloylinopeus on vin ja lähtöylinopeus vout (vektorit, km/s).
+ * Ohilento kääntää ylinopeuden suuntaa sitä enemmän, mitä läheltä planeetan ohi kuljetaan. Perikeskuksen
+ * etäisyys valitaan niin, että kääntökulma täsmää (keskimääräisellä ylinopeudella), ja jos nopeuksien suuruudet
+ * eroavat, ero poltetaan perikeskuksessa. Liian jyrkkä käännös (perikeskus planeetan sisällä) on mahdoton.
+ */
+export function flybyDv(via, vin, vout) {
+  const {mu,radiusKm}=FLIGHT_BODIES[via], a=norm(vin), b=norm(vout);
+  const turn=Math.acos(Math.max(-1,Math.min(1,dot(vin,vout)/(a*b)))), vm=(a+b)/2;
+  const minRp=radiusKm*(radiusKm>20000 ? 1.3 : 1.05);
+  const rp=turn<1e-6 ? Infinity : mu*(1/Math.sin(turn/2)-1)/(vm*vm);
+  if(rp<minRp) return null;
+  const r=Number.isFinite(rp) ? rp : 1e12;
+  return {dv:Math.abs(Math.sqrt(b*b+2*mu/r)-Math.sqrt(a*a+2*mu/r)), rp};
+}
+
+/**
+ * Lento planeetalta from planeetalle to planeetan via ohi: lähtö depart (ms), lentoajat tof1 ja tof2 (vrk).
+ * Rata koostuu kahdesta osuudesta (legs), jotka kohtaavat ohilentoplaneetan keskipisteessä (patched conics).
+ */
+export function assistTransfer(from, via, to, depart, tof1, tof2, ship = 'kemiallinen') {
+  const tB=depart+tof1*DAY_MS, arrive=tB+tof2*DAY_MS;
+  const a=departureState(from,depart), b=planetState(via,tB), c=planetState(to,arrive);
+  const l1=lambert(a.r,b.r,tof1*DAY_S); if(!l1) return null;
+  const l2=lambert(b.r,c.r,tof2*DAY_S); if(!l2) return null;
+  const fb=flybyDv(via,sub(l1.v2,b.v),sub(l2.v1,b.v)); if(!fb) return null;
+  const vinfDep=norm(sub(l1.v1,a.v)), vinfArr=norm(sub(l2.v2,c.v));
+  const dvDep=isPlanet(from) ? burnCost(ship,from,vinfDep) : vinfDep, dvArr=burnCost(ship,to,vinfArr);
+  return {from, to, via, depart, arrive, r1:a.r, v1:l1.v1, r2:c.r, v2:l2.v2, ship,
+    legs:[{t:depart, r:a.r, v:l1.v1}, {t:tB, r:b.r, v:l2.v1}],
+    flyby:{body:via, t:tB, dv:fb.dv, rpKm:fb.rp, vinf:norm(sub(l1.v2,b.v))},
+    vinfDep, vinfArr, dvDep, dvArr, dvFlyby:fb.dv, dvTotal:dvDep+fb.dv+dvArr, spiralOut:0, spiralIn:0};
+}
+
+/**
+ * Halvin yhden linkouksen reitti, kun ohilentoplaneetaksi kokeillaan jokaista muuta planeettaa. Generaattori
+ * kuten windowSearch: antaa edistymisen välillä progress = [alku, loppu] ja palauttaa reitin tai null.
+ */
+export function* assistSearch(from, to, start, {days = 730, ship = 'kemiallinen', progress = [0,1]} = {}) {
+  const vias=PLANETS.map(p=>p.name).filter(n=>n!==from && n!==to);
+  const D=40, T=12, a=n=>elements(n,start).a*AU_KM;
+  let best=null, done=0;
+  for(const via of vias) {
+    const t1=hohmann(a(from),a(via)).tof/DAY_S, t2=hohmann(a(via),a(to)).tof/DAY_S;
+    const r1=[Math.max(20,t1*0.3),t1*1.2], r2=[Math.max(20,t2*0.3),t2*1.2];
+    const step=[days/D,(r1[1]-r1[0])/T,(r2[1]-r2[0])/T];
+    let local=null;
+    for(let i=0;i<=D;i++) {
+      for(let j=0;j<=T;j++) for(let k=0;k<=T;k++) {
+        const x=[i*step[0], r1[0]+j*step[1], r2[0]+k*step[2]];
+        const tr=assistTransfer(from,via,to,start+x[0]*DAY_MS,x[1],x[2],ship);
+        if(tr && (!local || tr.dvTotal<local.cost)) local={x, cost:tr.dvTotal};
+      }
+      yield progress[0]+(progress[1]-progress[0])*(done+(i+1)/(D+1))/vias.length;
+    }
+    done++;
+    if(!local) continue;
+    const inside=x=>x[0]>=0 && x[0]<=days && x[1]>=r1[0] && x[1]<=r1[1] && x[2]>=r2[0] && x[2]<=r2[1];
+    const cost=x=>inside(x) ? assistTransfer(from,via,to,start+x[0]*DAY_MS,x[1],x[2],ship)?.dvTotal ?? Infinity : Infinity;
+    const x=refineN(cost,local.x,step), tr=assistTransfer(from,via,to,start+x[0]*DAY_MS,x[1],x[2],ship);
+    if(tr && (!best || tr.dvTotal<best.dvTotal)) best=tr;
+  }
+  return best;
 }
 
 /** Ajaa ikkunahaun loppuun kerralla (testit ja pienet haut). */
@@ -308,15 +422,26 @@ function asymptoteOffset(body, vinf) {
  * häivytetään vaikutuspiirin rajalla, jolloin kaukana näkymä vastaa siirtorataa. Ennen laukaisua alus on
  * lähtöplaneetan pysäköintiradalla.
  */
+// Siirtää paikan r vähintään etäisyydelle min kappaleen keskipisteestä c, jotta alus ei näy kappaleen sisällä.
+function clampOutside(r, c, min) {
+  const rel=sub(r,c), dist=norm(rel);
+  return dist>=min ? r : add(c,dist>1 ? scale(rel,min/dist) : [min,0,0]);
+}
+
 export function shipView(tr, time) {
+  if(tr.local) {
+    const s=shipState(tr,time), end=tr.toMoon ? tr.to : tr.from;
+    return {r:clampOutside(s.r,bodyState(end,time).r,orbitOf(end).periKm), v:s.v};
+  }
   const t=Math.max(time,tr.depart), s=shipState(tr,t), arr=planetState(tr.to,t);
   const fade=(rel,body)=>Math.max(0,1-norm(rel)/FLIGHT_BODIES[body].soiKm);
   // Korjattu rata ei kulje kohteen keskipisteen kautta, joten asymptootin siirtoa käytetään vain alkuperäisellä radalla.
   const arrOff=tr.legs?.length>1 ? [0,0,0] : asymptoteOffset(tr.to,sub(shipState(tr,tr.arrive).v,planetState(tr.to,tr.arrive).v));
   let r=add(s.r,scale(arrOff,fade(sub(s.r,arr.r),tr.to)));
   // Alus ei koskaan näy kohdeplaneetan sisällä: lähempänä kuin pysäköintiradan perikeskus se siirretään sen etäisyydelle.
-  const rel=sub(r,arr.r), dist=norm(rel), min=FLIGHT_BODIES[tr.to].periKm;
-  if(dist<min) r=add(arr.r,dist>1 ? scale(rel,min/dist) : [min,0,0]);
+  r=clampOutside(r,arr.r,FLIGHT_BODIES[tr.to].periKm);
+  // Linkouksessa alus ohittaa planeetan perikeskuksen etäisyydeltä.
+  if(tr.flyby) r=clampOutside(r,planetState(tr.flyby.body,t).r,Math.min(tr.flyby.rpKm,FLIGHT_BODIES[tr.flyby.body].soiKm/4));
   if(isPlanet(tr.from)) {
     const depOff=asymptoteOffset(tr.from,sub(tr.v1,planetState(tr.from,tr.depart).v));
     if(time<=tr.depart) return {r:add(planetState(tr.from,time).r,depOff), v:planetState(tr.from,time).v};
@@ -341,9 +466,9 @@ export function soiExit(tr) {
  * ja alkaa perikeskuksesta J2000-hetkellä, joten se on aina sama.
  */
 export function parkingState(body, time) {
-  const {mu,periKm,apoKm}=FLIGHT_BODIES[body], a=(periKm+apoKm)/2;
+  const {mu,periKm,apoKm}=orbitOf(body), a=(periKm+apoKm)/2;
   const vp=Math.sqrt(mu*(2/periKm-1/a));
-  const rel=propagate([periKm,0,0],[0,vp,0],(time-Date.UTC(2000,0,1,12))/1000,mu), p=planetState(body,time);
+  const rel=propagate([periKm,0,0],[0,vp,0],(time-Date.UTC(2000,0,1,12))/1000,mu), p=bodyState(body,time);
   return {r:add(p.r,rel.r), v:add(p.v,rel.v), rel};
 }
 
@@ -406,6 +531,8 @@ export function predict(tr, from) {
 export function applyBurn(tr, time, direction, dvKms) {
   const s=shipState(tr,time), legs=tr.legs ?? [{t:tr.depart, r:tr.r1, v:tr.v1}];
   const next={...tr, legs:[...legs.filter(l=>l.t<time), {t:time, r:s.r, v:add(s.v,burnVector(s,direction,dvKms))}]};
+  // Ennen linkousta tehty poltto vie aluksen pois ohilentoradalta.
+  if(next.flyby && next.flyby.t>time) delete next.flyby;
   return predict(next,time);
 }
 
@@ -418,6 +545,81 @@ export function autoCorrect(tr, time) {
   const sol=lambert(s.r,planetState(tr.to,arrive).r,(arrive-time)/1000);
   if(!sol) return null;
   const dv=norm(sub(sol.v1,s.v)), legs=tr.legs ?? [{t:tr.depart, r:tr.r1, v:tr.v1}];
-  const next=predict({...tr, legs:[...legs.filter(l=>l.t<time), {t:time, r:s.r, v:sol.v1}]},time);
-  return {flight:next, dv};
+  const corrected={...tr, legs:[...legs.filter(l=>l.t<time), {t:time, r:s.r, v:sol.v1}]};
+  if(corrected.flyby && corrected.flyby.t>time) delete corrected.flyby;
+  return {flight:predict(corrected,time), dv};
+}
+
+// --- Kuut ---
+
+/**
+ * Kuut kohteina: emoplaneetta, radan säde (km), säde, gravitaatioparametri (km³/s²), kiertoaika (vrk) ja
+ * pysäköintiradan korkeus. Kuun rata on yksinkertaistettu ympyräksi ekliptikan tasossa (Triton kiertää takaperin).
+ */
+export const MOONS = {
+  Kuu: {parent:'Maa', aKm:384400, radiusKm:1737.4, mu:4902.8, periodDays:27.3217, altKm:100, color:'#c9c5bd'},
+  Phobos: {parent:'Mars', aKm:9376, radiusKm:11.1, mu:0.000711, periodDays:0.31891, altKm:5, color:'#8a7a6a'},
+  Io: {parent:'Jupiter', aKm:421700, radiusKm:1821.6, mu:5959.9, periodDays:1.769, altKm:100, color:'#e8d36a'},
+  Europa: {parent:'Jupiter', aKm:671034, radiusKm:1560.8, mu:3202.7, periodDays:3.551, altKm:100, color:'#d9cfc0'},
+  Ganymedes: {parent:'Jupiter', aKm:1070412, radiusKm:2634.1, mu:9887.8, periodDays:7.155, altKm:100, color:'#a49a8c'},
+  Titan: {parent:'Saturnus', aKm:1221870, radiusKm:2574.7, mu:8978.1, periodDays:15.945, altKm:800, color:'#d9a54e'},
+  Enceladus: {parent:'Saturnus', aKm:238020, radiusKm:252.1, mu:7.21, periodDays:1.370, altKm:50, color:'#f2f5f8'},
+  Triton: {parent:'Neptunus', aKm:354759, radiusKm:1353.4, mu:1427.6, periodDays:-5.877, altKm:100, color:'#d8c4c0'},
+};
+export const isMoon = name => name in MOONS;
+export const moonsOf = planet => Object.keys(MOONS).filter(m=>MOONS[m].parent===planet);
+/** Kappaleen, jonka luona alus voi olla (planeetta tai kuu), pysäköintirata: periKm, apoKm, mu, radiusKm. */
+export function orbitOf(name) {
+  if(!isMoon(name)) return FLIGHT_BODIES[name];
+  const m=MOONS[name], r=m.radiusKm+m.altKm;
+  return {name, mu:m.mu, radiusKm:m.radiusKm, periKm:r, apoKm:r};
+}
+
+function moonAngle(name, time) {
+  const m=MOONS[name];
+  // Alkukulma kuun nimestä, jotta kuut eivät ole samassa linjassa.
+  const phase=[...name].reduce((s,c)=>s+c.charCodeAt(0),0)%360*Math.PI/180;
+  return phase+2*Math.PI*(time-Date.UTC(2000,0,1,12))/(m.periodDays*DAY_MS);
+}
+/** Kuun paikka ja nopeus emoplaneetan suhteen (km, km/s). */
+export function moonRel(name, time) {
+  const m=MOONS[name], th=moonAngle(name,time), v=2*Math.PI*m.aKm/(m.periodDays*DAY_S);
+  return {r:[m.aKm*Math.cos(th),m.aKm*Math.sin(th),0], v:[-v*Math.sin(th),v*Math.cos(th),0]};
+}
+/** Planeetan tai kuun paikka ja nopeus Auringon ympärillä. */
+export function bodyState(name, time) {
+  if(!isMoon(name)) return planetState(name,time);
+  const p=planetState(MOONS[name].parent,time), m=moonRel(name,time);
+  return {r:add(p.r,m.r), v:add(p.v,m.v)};
+}
+
+/**
+ * Lento emoplaneetan kiertoradalta kuuhun tai kuusta takaisin emoplaneetan kiertoradalle (Hohmannin siirto
+ * emoplaneetan ympärillä). Ellipsin perikeskus on planeetan pysäköintiradan perikeskuksen etäisyydellä ja
+ * apokeskus kuun radalla; kuu on apokeskuksessa saapumis- tai lähtöhetkellä.
+ */
+export function localTransfer(from, to, depart) {
+  const moon=isMoon(to) ? to : from, toMoon=isMoon(to), m=MOONS[moon], parent=m.parent, P=FLIGHT_BODIES[parent];
+  const rp=P.periKm, ra=m.aKm, a=(rp+ra)/2;
+  const tof=Math.PI*Math.sqrt(a**3/P.mu)*1000, arrive=depart+tof;
+  const vPeri=Math.sqrt(P.mu*(2/rp-1/a)), vApo=Math.sqrt(P.mu*(2/ra-1/a));
+  const vPark=Math.sqrt(P.mu*(2/rp-2/(P.periKm+P.apoKm))), vMoon=2*Math.PI*ra/(Math.abs(m.periodDays)*DAY_S);
+  // Takaperin kiertävän kuun (Triton) nopeus on vastakkainen siirtoradan nopeudelle.
+  const vinf=m.periodDays<0 ? vMoon+vApo : Math.abs(vMoon-vApo);
+  const mo=orbitOf(moon), moonBurn=burnDv(moon,vinf,mo), planetBurn=Math.abs(vPeri-vPark);
+  const dvDep=toMoon ? planetBurn : moonBurn, dvArr=toMoon ? moonBurn : planetBurn;
+  // Apokeskuksen suunta: kuun paikka saapuessa (kuuhun) tai lähtiessä (kuusta).
+  const apoAngle=moonAngle(moon,toMoon ? arrive : depart);
+  return {local:true, from, to, parent, depart, arrive, rp, ra, apoAngle, toMoon, mu:P.mu, vPeri, vApo,
+    dvDep, dvArr, dvTotal:dvDep+dvArr, vinfArr:toMoon ? vinf : 0, ship:'kemiallinen', spiralOut:0, spiralIn:0};
+}
+
+// Aluksen paikka paikallisella siirtoradalla: emoplaneetan suhteen Keplerin rata, Auringon suhteen siihen lisätään planeetta.
+function localState(tr, time) {
+  const t=Math.max(tr.depart,Math.min(tr.arrive,time)), c=Math.cos(tr.apoAngle), s=Math.sin(tr.apoAngle);
+  // Kuuhun: lähtö perikeskuksesta (apokeskusta vastapäätä). Kuusta: lähtö apokeskuksesta.
+  const rel=tr.toMoon ? propagate([-tr.rp*c,-tr.rp*s,0],[tr.vPeri*s,-tr.vPeri*c,0],(t-tr.depart)/1000,tr.mu)
+    : propagate([tr.ra*c,tr.ra*s,0],[-tr.vApo*s,tr.vApo*c,0],(t-tr.depart)/1000,tr.mu);
+  const p=planetState(tr.parent,time);
+  return {r:add(p.r,rel.r), v:add(p.v,rel.v), rel};
 }

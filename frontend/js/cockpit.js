@@ -7,7 +7,7 @@
 //
 // Koordinaatit: ekliptikan (x, y, z) → three.js (x, z, −y), eli ekliptikan pohjoisnapa on ylöspäin.
 import * as THREE from './vendor/three-0.170.0.module.min.js';
-import { FLIGHT_BODIES, planetState } from './flight.js';
+import { FLIGHT_BODIES, MOONS, bodyState } from './flight.js';
 import { PLANETS, SUN_RADIUS_KM } from './planets.js';
 import { BRIGHT_STARS } from './stars.js';
 import { glowCanvas, planetCanvas, ringCanvas } from './textures.js';
@@ -166,7 +166,9 @@ export function createCockpit(host, state) {
   scene.add(sunGlow,sunCore,sunLight,new THREE.AmbientLight(0x8090b0,0.18));
 
   // Planeetat: pallo tekstuureineen ja piste, joka pitää kaukaisen planeetan näkyvänä kirkkaana pisteenä.
-  const planets=PLANETS.map(p=>{
+  // Kuut piirretään samoin kuin planeetat; ne kääntävät aina saman puolen planeettaansa kohti.
+  const bodies=[...PLANETS, ...Object.entries(MOONS).map(([name,m])=>({name, radiusKm:m.radiusKm, color:m.color, moon:true}))];
+  const planets=bodies.map(p=>{
     const mesh=new THREE.Mesh(new THREE.SphereGeometry(p.radiusKm*KM,64,32),new THREE.MeshStandardMaterial({map:texture(planetCanvas(p.name)), roughness:1, metalness:0}));
     const dotGeo=new THREE.BufferGeometry(); dotGeo.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0],3));
     const dot=new THREE.Points(dotGeo,new THREE.PointsMaterial({color:p.color, size:3.5, sizeAttenuation:false, depthWrite:false}));
@@ -181,7 +183,7 @@ export function createCockpit(host, state) {
       // Saturnuksen pyörähdysakseli: RA 40,59°, Dec 83,54°.
       ring.lookAt(toScene(equatorial(40.59/15,83.54))); mesh.add(ring);
     }
-    return {name:p.name, mesh, dot};
+    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot};
   });
 
   // Moottorin hehku valaisee ohjaamon laukaisussa takaa.
@@ -237,13 +239,13 @@ export function createCockpit(host, state) {
     sunGlow.position.copy(sun); sunGlow.scale.setScalar(sun.length()*0.16);
     const k=renderer.domElement.clientHeight/2/Math.tan(camera.fov*Math.PI/360);
     for(const p of planets) {
-      const pos=rel(planetState(p.name,t).r);
+      const pos=rel(bodyState(p.name,t).r);
       p.mesh.position.copy(pos); p.dot.position.copy(pos);
-      p.mesh.rotation.y=2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
-      // Piste piilotetaan, kun pallo näkyy itse riittävän suurena.
-      p.dot.visible=FLIGHT_BODIES[p.name].radiusKm*KM/pos.length()*k<2;
+      p.mesh.rotation.y=p.moon ? 2*Math.PI*((t-Date.UTC(2000,0,1,12))/(MOONS[p.name].periodDays*86400000)%1) : 2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
+      // Piste piilotetaan, kun pallo näkyy itse riittävän suurena. Kuun piste näkyy vain alle 20 milj. km päästä.
+      p.dot.visible=p.radiusKm*KM/pos.length()*k<2 && (!p.moon || pos.length()<2e10);
     }
-    if(s.aim) {look.lookAt(origin,rel(planetState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
+    if(s.aim) {look.lookAt(origin,rel(bodyState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
     else want.copy(ship.quaternion);
     if(!attitudeReady) {ship.quaternion.copy(want); attitudeReady=true;}
     const turning=ship.quaternion.angleTo(want)>1e-4;

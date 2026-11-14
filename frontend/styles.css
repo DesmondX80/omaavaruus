@@ -347,3 +347,5 @@ html.nightvision { background: #000; }
 .voyage-log[open] { display: grid; gap: 10px; }
 .voyage-flights { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
 .voyage-flights li { display: grid; gap: 1px; padding-top: 6px; border-top: 1px solid var(--line); }
+.voyage-ships { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
+.voyage-ships button { font-size: 12px; }

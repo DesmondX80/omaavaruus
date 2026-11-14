@@ -133,9 +133,41 @@ const PAINTERS = {
     blotches(ctx,rnd,20,'#dfe8ff',3,10,0.4,0.6);
     ctx.fillStyle='#1f347a'; ctx.globalAlpha=0.85; ctx.beginPath(); ctx.ellipse(W*0.4,H*0.62,16,8,0,0,2*Math.PI); ctx.fill(); ctx.globalAlpha=1;
   },
+  // Kuut.
+  Kuu(ctx, rnd) { cratered(ctx,rnd,'#a9a59e','#7d7a74',[['#5d5b57',25,10,40]]); },
+  Phobos(ctx, rnd) { cratered(ctx,rnd,'#7a6e62','#4e463e',[]); },
+  Io(ctx, rnd) {
+    ctx.fillStyle='#e3cf62'; ctx.fillRect(0,0,W,H);
+    blotches(ctx,rnd,90,'#c0702e',4,16,0.6); blotches(ctx,rnd,60,'#f6f0c8',5,18,0.5); blotches(ctx,rnd,40,'#3a2a1a',2,5,0.8);
+  },
+  Europa(ctx, rnd) {
+    ctx.fillStyle='#ddd3c4'; ctx.fillRect(0,0,W,H);
+    blotches(ctx,rnd,40,'#b9a58c',10,30,0.4);
+    // Ruskeat murtumalinjat jääkuoressa.
+    ctx.strokeStyle='rgba(140,90,60,.55)';
+    for(let i=0;i<70;i++) {ctx.lineWidth=0.5+rnd()*1.5; ctx.beginPath(); const x=rnd()*W, y=rnd()*H; ctx.moveTo(x,y); ctx.quadraticCurveTo(x+(rnd()-0.5)*200,y+(rnd()-0.5)*80,x+(rnd()-0.5)*300,y+(rnd()-0.5)*100); ctx.stroke();}
+  },
+  Ganymedes(ctx, rnd) { cratered(ctx,rnd,'#9d9384','#6a6156',[['#c8c0b2',40,10,40]]); },
+  Titan(ctx, rnd) { bands(ctx,rnd,[[2,'#c98f3c'],[3,'#d9a54e'],[3,'#dcaa55'],[2,'#cf9844']],3); },
+  Enceladus(ctx, rnd) { cratered(ctx,rnd,'#eef2f6','#cdd6df',[['#bfd8ea',20,5,20]]); },
+  Triton(ctx, rnd) {
+    ctx.fillStyle='#d9c6bf'; ctx.fillRect(0,0,W,H);
+    blotches(ctx,rnd,80,'#b79a92',5,20,0.5); blotches(ctx,rnd,30,'#f4ece6',10,40,0.5,0.4);
+  },
 };
 
-/** Planeetan pintatekstuuri canvasina. */
+// Kraatteripinta: pohjaväri, kraatterien väri ja lisälaikut [väri, määrä, pienin ja suurin säde].
+function cratered(ctx, rnd, base, crater, extra) {
+  ctx.fillStyle=base; ctx.fillRect(0,0,W,H);
+  for(const [color,n,a,b] of extra) blotches(ctx,rnd,n,color,a,b,0.5);
+  for(let i=0;i<200;i++) {
+    const x=rnd()*W, y=rnd()*H, r=1+rnd()**3*10;
+    ctx.fillStyle=crater; ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(x,y,r,0,2*Math.PI); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+/** Planeetan tai kuun pintatekstuuri canvasina. */
 export function planetCanvas(name) {
   const [c,ctx]=canvas();
   PAINTERS[name](ctx, random([...name].reduce((s,ch)=>s*31+ch.charCodeAt(0),7)));
