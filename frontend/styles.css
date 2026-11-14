@@ -322,3 +322,9 @@ html.nightvision { background: #000; }
 .voyage-warps { grid-auto-flow: row; grid-template-columns: repeat(4, 1fr); }
 .voyage-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .voyage-actions .sky-btn { min-height: 38px; }
+.voyage-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.voyage-stats .stat { display: grid; gap: 2px; background: var(--bg-card); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.voyage-stats small { font-size: 12px; }
+.voyage-map-stage { position: relative; width: 100%; aspect-ratio: 1; max-height: 60vh; margin: 0 auto; }
+.voyage-map { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+.voyage-map-stage .sky-btn { min-height: 32px; background: rgba(5,7,15,.8); }

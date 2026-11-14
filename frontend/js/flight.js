@@ -246,3 +246,29 @@ export function fmtDuration(ms) {
   const s=Math.max(0,Math.floor(ms/1000)), d=Math.floor(s/86400), p=n=>String(n).padStart(2,'0');
   return `${d} vrk ${p(Math.floor(s/3600)%24)}:${p(Math.floor(s/60)%60)}:${p(s%60)}`;
 }
+
+/**
+ * Hetki (ms), jolloin alus saapuu kohdeplaneetan vaikutuspiiriin siirtoradalla tr. Etäisyys planeettaan pienenee
+ * loppua kohti, joten haetaan viimeinen piste vaikutuspiirin ulkopuolelta ja tarkennetaan puolitushaulla.
+ */
+export function soiEntry(tr) {
+  const soi=FLIGHT_BODIES[tr.to].soiKm;
+  const gap=t=>norm(sub(shipState(tr,t).r,planetState(tr.to,t).r))-soi;
+  const N=400, span=tr.arrive-tr.depart;
+  let lo=null;
+  for(let i=N-1;i>=0;i--) {const t=tr.depart+span*i/N; if(gap(t)>0) {lo=t; break;}}
+  if(lo===null) return tr.depart;
+  let hi=Math.min(tr.arrive,lo+span/N);
+  for(let i=0;i<60;i++) {const mid=(lo+hi)/2; if(gap(mid)>0) lo=mid; else hi=mid;}
+  return hi;
+}
+
+/** Lähin planeetta paikassa r (km) hetkellä time: nimi, etäisyys (km) ja aluksen nopeus v (km/s) sen suhteen. */
+export function nearestPlanet(r, v, time) {
+  let best=null;
+  for(const {name} of PLANETS) {
+    const s=planetState(name,time), d=norm(sub(r,s.r));
+    if(!best || d<best.distance) best={name, distance:d, speed:norm(sub(v,s.v))};
+  }
+  return best;
+}

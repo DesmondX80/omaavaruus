@@ -65,17 +65,12 @@ function orbitPath(ctx, el, toPx, w, h) {
   }
 }
 
-function draw() {
-  dirty=false; lastDraw=performance.now();
-  const canvas=el('solar-map'), w=canvas.clientWidth, h=canvas.clientHeight, scale=window.devicePixelRatio||1;
-  const time=mapTime(), planets=solarSystem(time);
-  renderText(planets,time);
-  if(!w||!h) return;
-  canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
-  const ctx=canvas.getContext('2d'), cx=w/2, cy=h/2, k=Math.min(w,h)/2/radius;
-  const center=follow==='Aurinko' ? [0,0] : planets.find(p=>p.name===follow)?.pos ?? fixed;
-  const toPx=([x,y])=>[cx+(x-center[0])*k, cy-(y-center[1])*k];
-  ctx.setTransform(scale,0,0,scale,0,0);
+/**
+ * Aurinkokunnan perusnäkymä kankaalle: tausta, kiertoradat, Aurinko ja planeetat nimineen sekä mittakaavajana.
+ * toPx muuntaa ekliptikan koordinaatit (AU) pikseleiksi ja k on pikseliä per AU. Palauttaa kohteiden
+ * napautusalueet. Myös Avaruuslennon kartta (voyage.js) piirtää tämän pohjalle.
+ */
+export function drawScene(ctx, planets, toPx, w, h, k, selected = null) {
   ctx.fillStyle='#03050b'; ctx.fillRect(0,0,w,h);
 
   for(const p of planets) {
@@ -86,7 +81,7 @@ function draw() {
 
   // Kohteet piirretään todellisen kokoisina, mutta vähintään pisteenä, jotta ne näkyvät kaukaa.
   const bodies=[{name:'Aurinko', color:'#ffd75e', pos:[0,0,0], radiusKm:SUN_RADIUS_KM, min:5}, ...planets.map(p=>({...p, min:3.5}))];
-  hits=[];
+  const hits=[];
   for(const b of bodies) {
     const [x,y]=toPx(b.pos), r=Math.max(b.min,b.radiusKm/AU_KM*k);
     hits.push({name:b.name, x, y, r});
@@ -121,6 +116,21 @@ function draw() {
   ctx.strokeStyle='#8b9ac0'; ctx.lineWidth=1; ctx.stroke();
   ctx.fillStyle='#8b9ac0'; ctx.fillText(text,10+len/2,h-16);
   ctx.textAlign='right'; ctx.fillText('kevätpiste →',w-8,18);
+  return hits;
+}
+
+function draw() {
+  dirty=false; lastDraw=performance.now();
+  const canvas=el('solar-map'), w=canvas.clientWidth, h=canvas.clientHeight, scale=window.devicePixelRatio||1;
+  const time=mapTime(), planets=solarSystem(time);
+  renderText(planets,time);
+  if(!w||!h) return;
+  canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
+  const ctx=canvas.getContext('2d'), cx=w/2, cy=h/2, k=Math.min(w,h)/2/radius;
+  const center=follow==='Aurinko' ? [0,0] : planets.find(p=>p.name===follow)?.pos ?? fixed;
+  const toPx=([x,y])=>[cx+(x-center[0])*k, cy-(y-center[1])*k];
+  ctx.setTransform(scale,0,0,scale,0,0);
+  hits=drawScene(ctx,planets,toPx,w,h,k,selected);
 
   el('solar-zoom-in').disabled=radius<=RADIUS_MIN; el('solar-zoom-out').disabled=radius>=RADIUS_MAX;
 }
