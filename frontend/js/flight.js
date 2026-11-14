@@ -172,7 +172,14 @@ export function transfer(from, to, depart, tofDays) {
 }
 
 /** Aluksen paikka ja nopeus siirtoradalla hetkellä time (ms). */
+// Kurssikorjausten jälkeen lennossa on osuuksia (legs: [{t, r, v}]); kullakin hetkellä käytetään viimeisintä
+// osuutta, joka on alkanut ennen sitä.
 export function shipState(tr, time) {
+  if(tr.legs) {
+    let leg=tr.legs[0];
+    for(const l of tr.legs) if(l.t<=time) leg=l;
+    return propagate(leg.r, leg.v, (time-leg.t)/1000);
+  }
   return propagate(tr.r1, tr.v1, (time-tr.depart)/1000);
 }
 
@@ -304,8 +311,12 @@ function asymptoteOffset(body, vinf) {
 export function shipView(tr, time) {
   const t=Math.max(time,tr.depart), s=shipState(tr,t), arr=planetState(tr.to,t);
   const fade=(rel,body)=>Math.max(0,1-norm(rel)/FLIGHT_BODIES[body].soiKm);
-  const arrOff=asymptoteOffset(tr.to,sub(shipState(tr,tr.arrive).v,planetState(tr.to,tr.arrive).v));
+  // Korjattu rata ei kulje kohteen keskipisteen kautta, joten asymptootin siirtoa käytetään vain alkuperäisellä radalla.
+  const arrOff=tr.legs?.length>1 ? [0,0,0] : asymptoteOffset(tr.to,sub(shipState(tr,tr.arrive).v,planetState(tr.to,tr.arrive).v));
   let r=add(s.r,scale(arrOff,fade(sub(s.r,arr.r),tr.to)));
+  // Alus ei koskaan näy kohdeplaneetan sisällä: lähempänä kuin pysäköintiradan perikeskus se siirretään sen etäisyydelle.
+  const rel=sub(r,arr.r), dist=norm(rel), min=FLIGHT_BODIES[tr.to].periKm;
+  if(dist<min) r=add(arr.r,dist>1 ? scale(rel,min/dist) : [min,0,0]);
   if(isPlanet(tr.from)) {
     const depOff=asymptoteOffset(tr.from,sub(tr.v1,planetState(tr.from,tr.depart).v));
     if(time<=tr.depart) return {r:add(planetState(tr.from,time).r,depOff), v:planetState(tr.from,time).v};
@@ -345,4 +356,68 @@ export function flightStats(tr, samples = 2000) {
     max=Math.max(max,norm(s.v)); prev=s.r;
   }
   return {km, maxSpeed:max};
+}
+
+// --- Kurssikorjaukset ---
+
+/** Polton suunnat: eteen (radan suuntaan), taakse, Aurinkoa kohti (sisään) ja poispäin (ulos). */
+export const BURN_DIRECTIONS = ['prograde','retrograde','inward','outward'];
+export function burnVector(state, direction, dvKms) {
+  const vh=scale(state.v,1/norm(state.v));
+  // Säteittäinen suunta kohtisuoraan nopeutta vastaan.
+  let out=sub(scale(state.r,1/norm(state.r)),scale(vh,dot(state.r,vh)/norm(state.r)));
+  out=scale(out,1/norm(out));
+  const dir={prograde:vh, retrograde:scale(vh,-1), outward:out, inward:scale(out,-1)}[direction];
+  return scale(dir,dvKms);
+}
+
+/**
+ * Kohtaaminen kohdeplaneetan kanssa hetkestä from alkaen: lähin ohitus (hetki, etäisyys km, suhteellinen nopeus km/s).
+ * Etäisyys lasketaan näytteistä ja tarkennetaan kultaisen leikkauksen haulla.
+ */
+export function encounter(tr, from, until) {
+  const d=t=>norm(sub(shipState(tr,t).r,planetState(tr.to,t).r));
+  const N=800, span=until-from;
+  let best=0, bestD=Infinity;
+  for(let i=0;i<=N;i++) {const v=d(from+span*i/N); if(v<bestD) {bestD=v; best=i;}}
+  let a=from+span*Math.max(0,best-1)/N, b=from+span*Math.min(N,best+1)/N;
+  const g=(Math.sqrt(5)-1)/2;
+  for(let i=0;i<80;i++) {
+    const c=b-g*(b-a), e=a+g*(b-a);
+    if(d(c)<d(e)) b=e; else a=c;
+  }
+  const t=(a+b)/2, s=shipState(tr,t), p=planetState(tr.to,t);
+  return {t, distance:norm(sub(s.r,p.r)), vinf:norm(sub(s.v,p.v))};
+}
+
+/**
+ * Lennon ennuste hetkestä from alkaen: osuuko alus kohteen vaikutuspiiriin, milloin se saapuu (lähin ohitus) ja
+ * paljonko jarrutus maksaa. Palauttaa päivitetyn lennon (arrive, soi, miss, missKm, vinfArr, dvArr).
+ */
+export function predict(tr, from) {
+  const until=Math.min(from+3*365.25*DAY_MS, Math.max(tr.planned ?? tr.arrive, from)+Math.max(60*DAY_MS, 0.6*((tr.planned ?? tr.arrive)-tr.depart)));
+  const e=encounter(tr,from,until), soi=FLIGHT_BODIES[tr.to].soiKm;
+  const next={...tr, planned:tr.planned ?? tr.arrive, arrive:e.t, missKm:e.distance, miss:e.distance>soi, vinfArr:e.vinf, dvArr:burnDv(tr.to,e.vinf)};
+  next.soi=next.miss ? e.t : soiEntry(next);
+  return next;
+}
+
+/** Poltto hetkellä time annettuun suuntaan: lennolle lisätään uusi osuus ja ennuste lasketaan uudelleen. */
+export function applyBurn(tr, time, direction, dvKms) {
+  const s=shipState(tr,time), legs=tr.legs ?? [{t:tr.depart, r:tr.r1, v:tr.v1}];
+  const next={...tr, legs:[...legs.filter(l=>l.t<time), {t:time, r:s.r, v:add(s.v,burnVector(s,direction,dvKms))}]};
+  return predict(next,time);
+}
+
+/**
+ * Automaattinen kurssikorjaus: Lambertin rata nykyisestä paikasta kohteeseen alkuperäisellä saapumishetkellä
+ * (tai vähintään 10 vrk päähän). Palauttaa korjatun lennon ja polton Δv:n tai null.
+ */
+export function autoCorrect(tr, time) {
+  const s=shipState(tr,time), arrive=Math.max(tr.planned ?? tr.arrive, time+10*DAY_MS);
+  const sol=lambert(s.r,planetState(tr.to,arrive).r,(arrive-time)/1000);
+  if(!sol) return null;
+  const dv=norm(sub(sol.v1,s.v)), legs=tr.legs ?? [{t:tr.depart, r:tr.r1, v:tr.v1}];
+  const next=predict({...tr, legs:[...legs.filter(l=>l.t<time), {t:time, r:s.r, v:sol.v1}]},time);
+  return {flight:next, dv};
 }

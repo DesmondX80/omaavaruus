@@ -438,3 +438,41 @@ describe("avaruuslennon saapuminen ja jatkolennot", async () => {
     }
   });
 });
+
+describe("avaruuslennon kurssikorjaukset", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const start = Date.parse("2026-11-14T00:00:00Z"), DAY = 86400000;
+  const [tr] = F.findWindows("Maa", "Mars", start);
+  const mid = tr.depart + 60 * DAY;
+
+  it("ennuste vastaa suunniteltua lentoa, kun kurssia ei ole muutettu", () => {
+    const p = F.predict(tr, mid);
+    expect(p.miss).toBe(false);
+    expect(p.missKm).toBeLessThan(1000);
+    expect(Math.abs(p.arrive - tr.arrive)).toBeLessThan(DAY / 4);
+    expect(p.dvArr).toBeCloseTo(tr.dvArr, 1);
+  });
+
+  it("poltto muuttaa rataa heti ja korjaus palauttaa kohteeseen", () => {
+    const burned = F.applyBurn(tr, mid, "prograde", 0.5);
+    // Polton hetkellä paikka ei muutu, mutta nopeus kasvaa 0,5 km/s.
+    const before = F.shipState(tr, mid), after = F.shipState(burned, mid + 1);
+    expect(F.norm(after.v) - F.norm(before.v)).toBeCloseTo(0.5, 2);
+    expect(burned.miss).toBe(true);
+    expect(burned.missKm).toBeGreaterThan(F.FLIGHT_BODIES.Mars.soiKm);
+    const fix = F.autoCorrect(burned, mid + 5 * DAY);
+    expect(fix.flight.miss).toBe(false);
+    expect(fix.dv).toBeGreaterThan(0.1);
+    expect(fix.dv).toBeLessThan(2);
+    // Ennen poltto-osuutta rata on ennallaan.
+    expect(F.norm(F.shipState(fix.flight, mid - DAY).r.map((x, i) => x - F.shipState(tr, mid - DAY).r[i]))).toBeLessThan(1e-3);
+  });
+
+  it("polton suunnat ovat kohtisuorassa toisiinsa nähden", () => {
+    const s = F.shipState(tr, mid);
+    const pro = F.burnVector(s, "prograde", 1), out = F.burnVector(s, "outward", 1);
+    expect(F.dot(pro, out)).toBeCloseTo(0, 10);
+    expect(F.norm(F.burnVector(s, "inward", 0.3))).toBeCloseTo(0.3, 10);
+    expect(F.dot(F.burnVector(s, "retrograde", 1), pro)).toBeCloseTo(-1, 10);
+  });
+});
