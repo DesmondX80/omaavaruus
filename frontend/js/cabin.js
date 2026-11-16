@@ -161,28 +161,123 @@ function power(ctx, w, h) {
   ctx.textAlign='right'; ctx.fillStyle=SCREEN_TEXT; ctx.fillText('AKKU 97 %',w-18,h-26); ctx.textAlign='left';
 }
 
+// Kulunut metallipinta: naarmuja, likaa, valumajälkiä, saumoja ja niittejä. Samaa kuvaa käytetään värinä ja kohokuviona.
+function metalTexture(seed, repeat) {
+  const [c,ctx]=canvas(512,512), rnd=random(seed);
+  ctx.fillStyle='#b9bec6'; ctx.fillRect(0,0,512,512);
+  const blot=(n, color, rMin, rMax, alpha)=>{
+    for(let i=0;i<n;i++) {
+      const x=rnd()*512, y=rnd()*512, r=rMin+rnd()*(rMax-rMin), g=ctx.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0,color); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.globalAlpha=alpha*(0.4+rnd()*0.6); ctx.fillStyle=g;
+      for(const dx of [-512,0,512]) for(const dy of [-512,0,512]) {ctx.setTransform(1,0,0,1,dx,dy); ctx.fillRect(x-r,y-r,2*r,2*r);}
+    }
+    ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=1;
+  };
+  blot(60,'#3a3f48',20,80,0.24); blot(30,'#eef1f5',15,50,0.16); blot(25,'#6b5444',5,20,0.3);
+  for(let i=0;i<160;i++) {
+    const x=rnd()*512, y=rnd()*512, len=20+rnd()*120;
+    ctx.strokeStyle=`rgba(30,34,40,${0.04+rnd()*0.1})`; ctx.lineWidth=1+rnd()*3; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+rnd()*4-2,y+len); ctx.stroke();
+  }
+  for(let i=0;i<900;i++) {
+    const x=rnd()*512, y=rnd()*512, a=rnd()*Math.PI, len=3+rnd()**2*40;
+    ctx.strokeStyle=rnd()<0.75 ? `rgba(245,248,252,${0.1+rnd()*0.35})` : `rgba(20,22,26,${0.15+rnd()*0.3})`;
+    ctx.lineWidth=0.5+rnd()*0.8; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+Math.cos(a)*len,y+Math.sin(a)*len); ctx.stroke();
+  }
+  for(const v of [96,352]) {
+    ctx.fillStyle='rgba(15,17,20,.7)'; ctx.fillRect(0,v,512,2); ctx.fillRect(v+40,0,2,512);
+    ctx.fillStyle='rgba(255,255,255,.35)'; ctx.fillRect(0,v+2,512,1); ctx.fillRect(v+42,0,1,512);
+    for(let x=16;x<512;x+=32) for(const [rx,ry] of [[x,v-9],[v+31,x]]) {
+      ctx.fillStyle='rgba(20,22,26,.55)'; ctx.beginPath(); ctx.arc(rx+0.7,ry+0.7,3,0,2*Math.PI); ctx.fill();
+      ctx.fillStyle='#d6dae0'; ctx.beginPath(); ctx.arc(rx,ry,2.4,0,2*Math.PI); ctx.fill();
+    }
+  }
+  const t=texture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat,repeat);
+  return t;
+}
+// Reikälevy lattiaan.
+function floorTexture() {
+  const [c,ctx]=canvas(128,128), rnd=random(77);
+  ctx.fillStyle='#3d424b'; ctx.fillRect(0,0,128,128);
+  for(let i=0;i<300;i++) {ctx.fillStyle=`rgba(${rnd()<0.5 ? '255,255,255' : '0,0,0'},${rnd()*0.08})`; ctx.fillRect(rnd()*128,rnd()*128,3,1);}
+  for(let y=8;y<128;y+=16) for(let x=8;x<128;x+=16) {
+    ctx.fillStyle='#0b0c0f'; ctx.beginPath(); ctx.arc(x,y,3.6,0,2*Math.PI); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x,y,4.2,0.6,2.6); ctx.stroke();
+  }
+  ctx.fillStyle='#17191d'; ctx.fillRect(0,0,128,2); ctx.fillRect(0,0,2,128);
+  const t=texture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(9,7);
+  return t;
+}
+// Ristikkotuen levy: metallipinta, johon on leikattu kevennysreiät (läpinäkyvyys alfakanavassa).
+function trussTexture() {
+  const [c,ctx]=canvas(128,512), rnd=random(9);
+  ctx.fillStyle='#aeb4bd'; ctx.fillRect(0,0,128,512);
+  for(let i=0;i<400;i++) {ctx.strokeStyle=`rgba(${rnd()<0.6 ? '250,252,255' : '25,28,32'},${0.1+rnd()*0.3})`; ctx.lineWidth=0.6; ctx.beginPath(); const x=rnd()*128, y=rnd()*512; ctx.moveTo(x,y); ctx.lineTo(x+rnd()*16-8,y+rnd()*30-15); ctx.stroke();}
+  ctx.strokeStyle='rgba(20,22,26,.6)'; ctx.lineWidth=3; ctx.strokeRect(5,5,118,502);
+  ctx.globalCompositeOperation='destination-out';
+  for(let i=0;i<5;i++) {
+    const y=34+i*96, flip=i%2;
+    ctx.beginPath();
+    if(flip) {ctx.moveTo(26,y); ctx.lineTo(102,y); ctx.lineTo(102,y+64);} else {ctx.moveTo(26,y); ctx.lineTo(102,y+64); ctx.lineTo(26,y+64);}
+    ctx.closePath(); ctx.lineJoin='round'; ctx.lineWidth=10; ctx.fill();
+  }
+  ctx.globalCompositeOperation='source-over';
+  return texture(c);
+}
+// Ympäristökartta metallin heijastuksiin: tumma ohjaamo, jonka ikkunoiden korkeudella on vaalea sinertävä vyö.
+function environment() {
+  const [c,ctx]=canvas(256,128), g=ctx.createLinearGradient(0,0,0,128);
+  g.addColorStop(0,'#1a1f28'); g.addColorStop(0.3,'#4a586c'); g.addColorStop(0.46,'#b9cbe4'); g.addColorStop(0.56,'#7f93b0'); g.addColorStop(0.7,'#1c212a'); g.addColorStop(1,'#07080b');
+  ctx.fillStyle=g; ctx.fillRect(0,0,256,128);
+  const t=texture(c);
+  t.mapping=THREE.EquirectangularReflectionMapping;
+  return t;
+}
+
 /**
- * Rakentaa ohjaamon. main on kolmen päänäytön lista (display()), nav ja systems ovat kattonäytöt (screen()).
- * Palauttaa ryhmän, joka lisätään alukseen.
+ * Rakentaa ohjaamon: kaareva kuomun kehys vinotukineen, kulunutta metallia, keskikonsoli kolmella näytöllä, kattonäytöt
+ * yläkulmissa sekä sivuilla koneistot ja kaapeliniput. main on kolmen päänäytön lista (display()), nav ja systems ovat
+ * kattonäytöt (screen()). Palauttaa ryhmän, joka lisätään alukseen.
  */
 export function buildCabin(main, nav, systems) {
-  const root=new THREE.Group();
+  const root=new THREE.Group(), env=environment();
+  const metal=(color, repeat, roughness, metalness, seed = 3)=>{
+    const t=metalTexture(seed,repeat);
+    return new THREE.MeshStandardMaterial({color, map:t, bumpMap:t, bumpScale:0.5, roughness, metalness, envMap:env, envMapIntensity:0.9});
+  };
+  const steel=metal(0x9aa6b8,2,0.5,0.6), plate=metal(0x7b8798,3,0.55,0.55,5), dark=metal(0x343a45,3,0.6,0.5,8);
+  const gloss=new THREE.MeshStandardMaterial({color:0x0c0e12, roughness:0.22, metalness:0.85, envMap:env, envMapIntensity:1.2});
   const hull=new THREE.MeshStandardMaterial({color:0x1c2028, roughness:0.85, metalness:0.2, emissive:0x05070a});
-  const shell=new THREE.MeshStandardMaterial({color:0x2b303a, roughness:0.62, metalness:0.45, emissive:0x07090d});
-  const trim=new THREE.MeshStandardMaterial({color:0x4a505b, roughness:0.5, metalness:0.6, emissive:0x0a0c10});
-  const rubber=new THREE.MeshStandardMaterial({color:0x0c0d10, roughness:0.95, metalness:0});
+  const rubber=new THREE.MeshStandardMaterial({color:0x0c0d10, roughness:0.9, metalness:0});
   const fabric=new THREE.MeshStandardMaterial({color:0x23262d, roughness:1, metalness:0, emissive:0x050506});
-  const bezel=new THREE.MeshStandardMaterial({color:0x08090b, roughness:0.4, metalness:0.3});
-  const accent=new THREE.MeshBasicMaterial({color:0x1f7ea3, toneMapped:false});
+  const bezel=new THREE.MeshStandardMaterial({color:0x08090b, roughness:0.4, metalness:0.3, envMap:env, envMapIntensity:0.4});
+  const blue=new THREE.MeshBasicMaterial({color:0x4fb8ff, toneMapped:false});
+  const lens=new THREE.MeshBasicMaterial({color:0x0e2a40, toneMapped:false});
+  const cyan=new THREE.MeshBasicMaterial({color:0x2fd0e8, toneMapped:false});
+  const warn=new THREE.MeshBasicMaterial({color:0xff5a4a, toneMapped:false});
   const lamp=new THREE.MeshBasicMaterial({color:0xcfe0ff, toneMapped:false});
   const red=new THREE.MeshStandardMaterial({color:0xb3261e, roughness:0.5, emissive:0x2a0504});
+  const floor=new THREE.MeshStandardMaterial({map:floorTexture(), roughness:0.6, metalness:0.5, envMap:env, envMapIntensity:0.5});
+  const truss=new THREE.MeshStandardMaterial({map:trussTexture(), alphaTest:0.5, side:THREE.DoubleSide, roughness:0.5, metalness:0.6, envMap:env, envMapIntensity:0.9});
 
   const add=(parent, mesh, x, y, z, rx = 0, ry = 0, rz = 0)=>{
     mesh.rotation.order='YXZ'; mesh.position.set(x,y,z); mesh.rotation.set(rx,ry,rz); parent.add(mesh); return mesh;
   };
   const box=(parent, w, h, d, mat, ...at)=>add(parent,new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat),...at);
   const plane=(parent, w, h, mat, ...at)=>add(parent,new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat),...at);
-  const cyl=(parent, r1, r2, h, mat, ...at)=>add(parent,new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,20),mat),...at);
+  const cyl=(parent, r1, r2, h, mat, ...at)=>add(parent,new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,28),mat),...at);
+  // Palkki pisteestä a pisteeseen b: pituusakseli osoittaa a:sta b:hen.
+  const Y=new THREE.Vector3(0,1,0);
+  const between=(mesh, a, b)=>{
+    const va=new THREE.Vector3(...a), vb=new THREE.Vector3(...b);
+    mesh.position.copy(va).add(vb).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(Y,vb.clone().sub(va).normalize());
+    root.add(mesh); return mesh;
+  };
+  const length=(a, b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+  const beam=(a, b, w, d, mat)=>between(new THREE.Mesh(new THREE.BoxGeometry(w,length(a,b),d),mat),a,b);
   // Näyttö kehyksineen: kuva on hieman kehyksen etupinnan edessä.
   const monitor=(parent, w, h, mat, x, y, z, rx = 0, ry = 0)=>{
     const g=add(parent,new THREE.Group(),x,y,z,rx,ry);
@@ -192,98 +287,133 @@ export function buildCabin(main, nav, systems) {
   };
   const screenMat=s=>new THREE.MeshBasicMaterial({map:s.texture, toneMapped:false});
 
-  // --- Runko: etu- ja sivuikkunoiden kehykset, katto, seinät ja lattia ---
-  const SIDE=Math.atan2(0.45,1.2), SIDE_LEN=Math.hypot(0.45,1.2)+0.12;
-  box(root,3.3,0.1,0.16,shell,0,-0.4,-1.42);
-  box(root,3.3,0.12,0.2,shell,0,0.7,-1.38);
-  box(root,3.3,0.02,0.05,trim,0,0.635,-1.3);
-  box(root,3.3,0.85,0.08,hull,0,-0.86,-1.46);
+  // --- Kuomun kehys: puolisoikion muotoinen kaari jalkoineen, pursotettuna levystä ---
+  const arch=new THREE.Shape();
+  arch.moveTo(2.02,-0.9); arch.lineTo(2.02,0); arch.absellipse(0,0,2.02,1.42,0,Math.PI,false); arch.lineTo(-2.02,-0.9);
+  arch.lineTo(-1.76,-0.9); arch.lineTo(-1.76,0); arch.absellipse(0,0,1.76,1.17,Math.PI,0,true); arch.lineTo(1.76,-0.9); arch.closePath();
+  const archGeo=new THREE.ExtrudeGeometry(arch,{depth:0.2, bevelEnabled:true, bevelThickness:0.015, bevelSize:0.015, bevelSegments:2, curveSegments:48});
+  add(root,new THREE.Mesh(archGeo,steel),0,-0.45,-1.64);
+  // Kaaren sisäreunan tumma tiiviste ja alapalkki.
+  const lip=new THREE.Shape();
+  lip.moveTo(1.76,-0.9); lip.lineTo(1.76,0); lip.absellipse(0,0,1.76,1.17,0,Math.PI,false); lip.lineTo(-1.76,-0.9);
+  lip.lineTo(-1.72,-0.9); lip.lineTo(-1.72,0); lip.absellipse(0,0,1.72,1.13,Math.PI,0,true); lip.lineTo(1.72,-0.9); lip.closePath();
+  add(root,new THREE.Mesh(new THREE.ExtrudeGeometry(lip,{depth:0.1, bevelEnabled:false, curveSegments:48}),rubber),0,-0.45,-1.6);
+  box(root,3.6,0.12,0.22,plate,0,-0.52,-1.55);
+  box(root,3.6,0.8,0.1,hull,0,-0.95,-1.62);
+  // Yläpalkki, josta vinotuet laskevat keskikonsoliin, ja sen pienet koneistokotelot.
+  box(root,2.5,0.14,0.2,plate,0,0.79,-1.34);
+  box(root,0.5,0.06,0.16,dark,0,0.7,-1.3);
   for(const s of [-1,1]) {
-    box(root,0.12,1.2,0.14,shell,s*1.56,0.15,-1.4,0,0,s*0.1);
-    box(root,0.03,1.2,0.03,trim,s*1.5,0.15,-1.33,0,0,s*0.1);
-    box(root,0.12,0.1,SIDE_LEN,shell,s*1.78,-0.4,-0.8,0,s*SIDE);
-    box(root,0.14,0.12,SIDE_LEN,shell,s*1.76,0.7,-0.8,0,s*SIDE);
-    box(root,0.08,0.85,SIDE_LEN,hull,s*1.8,-0.86,-0.8,0,s*SIDE);
-    box(root,0.13,1.25,0.16,shell,s*2.0,0.15,-0.18,0,0,s*0.06);
-    box(root,0.08,2.3,1.4,hull,s*2.04,-0.15,0.5);
-    // Sivuikkunan alla kulkeva käsijohde ja kapea merkkivalonauha.
-    box(root,0.03,0.03,SIDE_LEN-0.2,trim,s*1.71,-0.31,-0.8,0,s*SIDE);
-    box(root,0.012,0.012,SIDE_LEN-0.3,accent,s*1.735,-0.455,-0.8,0,s*SIDE);
+    box(root,0.3,0.05,0.14,dark,s*0.62,0.705,-1.3);
+    beam([s*0.9,0.74,-1.38],[s*0.13,-0.3,-1.52],0.085,0.06,steel);
+    beam([s*0.84,0.74,-1.36],[s*0.1,-0.26,-1.5],0.02,0.02,dark);
+    // Ristikkotuet kaaren kyljestä konsolin sivuun: reikälevy ja kaksi laippaa.
+    const a=[s*1.74,0.36,-1.5], b=[s*0.98,-0.66,-1.14], len=length(a,b);
+    between(new THREE.Mesh(new THREE.PlaneGeometry(0.2,len),truss),a,b);
+    for(const e of [-0.1,0.1]) beam([a[0]+e,a[1],a[2]],[b[0]+e,b[1],b[2]],0.022,0.05,plate);
+    box(root,0.3,0.12,0.22,plate,b[0],b[1]-0.02,b[2]);
+    box(root,0.24,0.2,0.16,plate,s*1.72,0.4,-1.5);
+    // Sivurakenne: kylkikaari, alarunko ja takaseinä.
+    beam([s*2.06,-0.4,-0.3],[s*1.62,1.0,-0.3],0.14,0.16,steel);
+    box(root,0.1,0.95,2.9,hull,s*2.08,-0.88,-0.2);
+    box(root,0.1,0.1,1.4,plate,s*2.05,-0.4,-0.95);
+    box(root,0.08,2.4,1.5,hull,s*2.06,-0.1,0.55);
+    box(root,0.05,0.05,1.3,plate,s*1.82,0.98,-0.95,0,0,s*0.3);
   }
-  box(root,4.2,2.3,0.08,hull,0,-0.15,1.15);
-  box(root,4.2,0.06,2.8,rubber,0,-1.28,-0.1);
-  // Katto: tasainen osa ja ikkunaa kohti laskeva etuosa, jossa ovat valonauhat ja yläpaneeli.
-  box(root,4.2,0.06,2.3,hull,0,0.95,0.1);
-  const slope=add(root,new THREE.Group(),0,0.83,-1.15,-0.43,0);
-  box(slope,4.2,0.05,0.56,hull,0,0,0);
-  for(const s of [-1,1]) {
-    box(slope,0.62,0.012,0.045,lamp,s*1.05,-0.03,0.05);
-    box(slope,0.66,0.02,0.075,shell,s*1.05,-0.026,0.05);
-    box(slope,0.3,0.012,0.03,accent,s*1.75,-0.03,-0.1);
-  }
-  plane(slope,0.95,0.42,panel(608,272,11,3,1),0,-0.031,0.02,Math.PI/2,0);
-  box(slope,1.0,0.02,0.47,shell,0,-0.018,0.02);
-  box(root,0.9,0.012,0.04,lamp,0,0.915,-0.2);
-  box(root,0.9,0.012,0.04,lamp,0,0.915,0.5);
+  box(root,4.3,2.4,0.08,hull,0,-0.1,1.2);
+  plane(root,4.4,3.0,floor,0,-1.3,-0.2,-Math.PI/2,0);
+  box(root,4.3,0.06,2.6,hull,0,1.03,0);
+  // Kattopaneeli ja valot (näkyvät, kun katsoo ylös).
+  plane(root,0.95,0.42,panel(608,272,11,3,1),0,0.988,-0.72,Math.PI/2,0);
+  box(root,1.02,0.03,0.48,dark,0,1.005,-0.72);
+  for(const z of [-0.2,0.5]) box(root,0.8,0.012,0.04,lamp,0,0.995,z);
   // Lasi heijastaa hieman sinistä.
-  plane(root,3.1,1.0,new THREE.MeshBasicMaterial({color:0x8fb4ff, transparent:true, opacity:0.03, depthWrite:false}),0,0.15,-1.4);
+  plane(root,3.5,1.7,new THREE.MeshBasicMaterial({color:0x8fb4ff, transparent:true, opacity:0.03, depthWrite:false}),0,0.1,-1.6);
 
-  // --- Kattonäytöt: navigointi vasemmalla, järjestelmät oikealla ---
+  // --- Kattonäytöt yläkulmissa: navigointi vasemmalla, järjestelmät oikealla ---
   [[-1,nav],[1,systems]].forEach(([s,scr])=>{
-    const m=monitor(root,0.44,0.2475,screenMat(scr),s*0.94,0.44,-1.26,0.22,-s*0.5);
-    box(m,0.47,0.28,0.045,shell,0,0,-0.042);
-    cyl(m,0.012,0.012,0.22,trim,0,0.24,-0.045);
-    box(m,0.08,0.025,0.07,shell,0,0.142,-0.045);
+    const m=monitor(root,0.5,0.28,screenMat(scr),s*0.92,0.42,-1.2,0.2,-s*0.5);
+    box(m,0.58,0.37,0.08,dark,0,-0.005,-0.06);
+    box(m,0.62,0.04,0.11,plate,0,0.195,-0.055);
+    box(m,0.04,0.37,0.09,plate,s*0.3,-0.005,-0.055);
+    box(m,0.1,0.2,0.09,plate,-s*0.08,0.3,-0.075);
+    for(let i=0;i<4;i++) box(m,0.02,0.008,0.004,i===1 ? warn : cyan,-s*0.21+i*0.03*s,-0.165,-0.018);
   });
 
-  // --- Kojelauta: kallistettu näyttöpaneeli, häikäisysuoja ja kytkinhylly ---
-  const TILT=-0.6;
-  box(root,2.5,0.62,0.62,hull,0,-0.9,-1.12);
-  const dash=add(root,new THREE.Group(),0,-0.47,-1.1,TILT,0);
-  box(dash,2.4,0.46,0.05,shell,0,0,-0.03);
-  main.forEach((s,i)=>monitor(dash,0.62,0.31,screenMat(s),(i-1)*0.74,0.015,0.004));
-  box(dash,2.4,0.006,0.006,accent,0,-0.215,0.003);
-  box(root,2.5,0.025,0.15,rubber,0,-0.262,-1.19,0.1,0);
-  const shelf=add(root,new THREE.Group(),0,-0.7,-0.8,0.3,0);
-  box(shelf,2.4,0.04,0.34,shell,0,0,0);
-  plane(shelf,1.2,0.3,panel(768,192,23,4,1),0,0.021,0,-Math.PI/2,0);
-  box(shelf,2.4,0.02,0.02,trim,0,0.012,0.17);
-  // Ohjainsauva oikealla ja tehovipu vasemmalla.
-  const stick=add(shelf,new THREE.Group(),0.8,0.02,0.02);
-  cyl(stick,0.05,0.055,0.02,trim,0,0.01,0);
-  cyl(stick,0.02,0.042,0.05,rubber,0,0.045,0);
-  cyl(stick,0.011,0.011,0.1,trim,0,0.11,0);
-  add(stick,new THREE.Mesh(new THREE.CapsuleGeometry(0.023,0.085,6,16),rubber),0,0.2,0.006,0.12,0);
-  add(stick,new THREE.Mesh(new THREE.SphereGeometry(0.009,12,8),red),0,0.262,0.018);
-  const throttle=add(shelf,new THREE.Group(),-0.8,0.02,0.02);
-  box(throttle,0.16,0.03,0.24,bezel,0,0.015,0);
-  for(const dx of [-0.035,0.035]) {
-    box(throttle,0.01,0.11,0.01,trim,dx,0.075,-0.015,-0.35,0);
-    box(throttle,0.04,0.024,0.03,rubber,dx,0.13,-0.035,-0.35,0);
+  // --- Keskikonsoli: torni, jonka huipulla palavat siniset valot, keskinäyttö ja kaksi sivunäyttökoteloa ---
+  const TILT=-0.55;
+  box(root,0.38,0.7,0.3,plate,0,-0.95,-1.27);
+  box(root,0.3,0.6,0.22,plate,0,-1.0,-0.95);
+  box(root,0.2,0.34,0.16,dark,0,-0.37,-1.44);
+  box(root,0.27,0.05,0.21,steel,0,-0.185,-1.44);
+  box(root,0.3,0.06,0.24,steel,0,-0.56,-1.42);
+  for(const dx of [-0.045,0.045]) box(root,0.035,0.2,0.006,blue,dx,-0.36,-1.357);
+  box(root,0.14,0.012,0.006,cyan,0,-0.235,-1.357);
+  monitor(root,0.44,0.22,screenMat(main[1]),0,-0.5,-1.05,TILT,0);
+  box(root,0.5,0.03,0.1,dark,0,-0.375,-1.19,0.1,0);
+  plane(root,0.34,0.2,panel(272,160,23,2,1),0,-0.69,-0.9,-1.15,0);
+  box(root,0.38,0.03,0.24,dark,0,-0.705,-0.905,-1.15+Math.PI/2,0);
+  for(const s of [-1,1]) {
+    const pod=add(root,new THREE.Group(),s*0.57,-0.5,-1.1,0,-s*0.32);
+    box(pod,0.54,0.3,0.3,dark,0,-0.03,-0.25);
+    monitor(pod,0.44,0.22,screenMat(main[s<0 ? 0 : 2]),0,0,0,TILT,0);
+    box(pod,0.54,0.035,0.14,plate,0,0.14,-0.2,0.1,0);
+    for(let i=0;i<6;i++) box(pod,0.022,0.01,0.004,i%4===2 ? warn : cyan,-0.09+i*0.036,0.133,-0.127,0.1,0);
+    // Kotelon alla kaksi linssimäistä anturia ja tukijalka.
+    for(const dx of [-0.12,0.12]) {
+      cyl(pod,0.07,0.07,0.12,gloss,dx,-0.25,-0.08,Math.PI/2,0);
+      add(pod,new THREE.Mesh(new THREE.TorusGeometry(0.072,0.012,10,28),steel),dx,-0.25,-0.02);
+      add(pod,new THREE.Mesh(new THREE.CircleGeometry(0.035,20),blue),dx,-0.25,-0.0195).material=lens;
+    }
+    box(pod,0.22,0.55,0.2,plate,0,-0.58,-0.2);
+    beam([s*0.36,-0.62,-1.2],[s*0.19,-0.7,-1.15],0.05,0.05,steel);
   }
-  box(throttle,0.012,0.004,0.2,accent,0.075,0.031,0);
 
-  // --- Sivukonsolit: kääntyvät lentäjää kohti, päällä kytkinpaneeli ja pieni näyttö ---
-  [[-1,staticScreen(lifeSupport),31],[1,staticScreen(power),47]].forEach(([s,mat,seed])=>{
-    const c=add(root,new THREE.Group(),s*1.22,0,-0.46,0,Math.atan2(-s*1.22,0.46));
-    box(c,1.0,0.56,0.52,hull,0,-0.93,-0.05);
-    const top=add(c,new THREE.Group(),0,-0.6,0,-1.05,0);
-    box(top,1.0,0.5,0.04,shell,0,0,-0.022);
-    plane(top,0.56,0.44,panel(448,352,seed,2,2),-s*0.2,0,0.001);
-    monitor(top,0.32,0.2,mat,s*0.3,0.1,0.004);
-    plane(top,0.32,0.17,panel(256,136,seed+1,1,1),s*0.3,-0.14,0.001);
-    box(top,1.0,0.006,0.006,accent,0,-0.245,0.003);
-    box(c,1.0,0.02,0.03,trim,0,-0.385,-0.245);
+  // --- Sivujen koneistot: kiiltävät sylinterit vanteineen, pienet järjestelmänäytöt ja kaapeliniput ---
+  const rnd=random(321);
+  const cable=new THREE.MeshStandardMaterial({color:0x101216, roughness:0.45, metalness:0.3, envMap:env, envMapIntensity:0.6});
+  const cableBlue=new THREE.MeshStandardMaterial({color:0x16304a, roughness:0.45, metalness:0.3, envMap:env, envMapIntensity:0.6});
+  [[-1,staticScreen(lifeSupport)],[1,staticScreen(power)]].forEach(([s,mat])=>{
+    cyl(root,0.21,0.21,1.25,gloss,s*1.44,-0.62,-0.72,Math.PI/2,0);
+    cyl(root,0.13,0.21,0.2,gloss,s*1.44,-0.62,-1.44,Math.PI/2,0);
+    for(const z of [-1.3,-0.95,-0.5,-0.15]) cyl(root,0.225,0.225,0.06,steel,s*1.44,-0.62,z,Math.PI/2,0);
+    box(root,0.5,0.14,1.3,plate,s*1.44,-0.9,-0.72);
+    box(root,0.62,0.3,1.5,hull,s*1.5,-1.12,-0.75);
+    monitor(root,0.3,0.19,mat,s*1.04,-0.36,-0.96,-0.35,-s*0.8);
+    beam([s*1.1,-0.47,-1.02],[s*1.3,-0.62,-1.0],0.03,0.03,steel);
+    for(let i=0;i<11;i++) {
+      const curve=new THREE.CatmullRomCurve3([
+        new THREE.Vector3(s*(1.2+rnd()*0.35),-0.84,-0.1-rnd()*0.25),
+        new THREE.Vector3(s*(0.95+rnd()*0.45),-1.2+rnd()*0.12,-0.55-rnd()*0.2),
+        new THREE.Vector3(s*(0.8+rnd()*0.5),-1.22+rnd()*0.1,-1.0-rnd()*0.15),
+        new THREE.Vector3(s*(0.7+rnd()*0.6),-1.0+rnd()*0.2,-1.5),
+      ]);
+      root.add(new THREE.Mesh(new THREE.TubeGeometry(curve,28,0.011+rnd()*0.009,7),i%4===0 ? cableBlue : cable));
+    }
   });
+  // Jalkatuet lattialla.
+  for(const s of [-1,1]) box(root,0.2,0.04,0.5,plate,s*0.3,-1.27,-0.65,0.25,0);
 
-  // --- Istuin: näkyy, kun katsoo alas tai taakse ---
+  // --- Istuin käsinojineen: ohjainsauva oikean ja tehovipu vasemman käsinojan päässä ---
   box(root,0.56,0.12,0.5,fabric,0,-0.98,0.22);
   box(root,0.56,0.95,0.12,fabric,0,-0.5,0.56,-0.1,0);
   box(root,0.34,0.22,0.1,fabric,0,0.12,0.62,-0.1,0);
-  box(root,0.3,0.5,0.3,hull,0,-1.1,0.3);
+  box(root,0.3,0.5,0.3,plate,0,-1.1,0.3);
   for(const s of [-1,1]) {
-    box(root,0.09,0.06,0.5,fabric,s*0.36,-0.74,0.2);
-    box(root,0.05,0.2,0.05,trim,s*0.36,-0.86,0.38);
+    box(root,0.1,0.06,0.62,fabric,s*0.36,-0.74,0.14);
+    box(root,0.05,0.2,0.05,steel,s*0.36,-0.86,0.38);
+    box(root,0.12,0.05,0.16,dark,s*0.36,-0.745,-0.24);
+  }
+  const stick=add(root,new THREE.Group(),0.36,-0.72,-0.24);
+  cyl(stick,0.045,0.05,0.02,steel,0,0.01,0);
+  cyl(stick,0.02,0.04,0.05,rubber,0,0.045,0);
+  cyl(stick,0.011,0.011,0.1,steel,0,0.11,0);
+  add(stick,new THREE.Mesh(new THREE.CapsuleGeometry(0.023,0.085,6,16),rubber),0,0.2,0.006,0.12,0);
+  add(stick,new THREE.Mesh(new THREE.SphereGeometry(0.009,12,8),red),0,0.262,0.018);
+  const throttle=add(root,new THREE.Group(),-0.36,-0.72,-0.24);
+  for(const dx of [-0.03,0.03]) {
+    box(throttle,0.01,0.11,0.01,steel,dx,0.075,-0.015,-0.35,0);
+    box(throttle,0.04,0.024,0.03,rubber,dx,0.13,-0.035,-0.35,0);
   }
   return root;
 }
