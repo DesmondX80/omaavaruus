@@ -18,7 +18,8 @@ describe("frontend", () => {
   it("service worker tallettaa kaikki sovelluksen tiedostot", () => {
     const list = read("sw.js").match(/const SHELL = \[([\s\S]*?)\];/)[1];
     const shell = [...list.matchAll(/"([^"]+)"/g)].map((m) => (m[1] === "./" ? "index.html" : m[1]));
-    expect(shell.sort()).toEqual(files.filter((f) => f !== "sw.js").sort());
+    // Valokuvatekstuurit talletetaan vasta käytettäessä, jotta asennus pysyy kevyenä.
+    expect(shell.sort()).toEqual(files.filter((f) => f !== "sw.js" && !f.startsWith("textures/")).sort());
   });
 
   it("JavaScript-tiedostot ovat syntaksiltaan kelvollisia", () => {

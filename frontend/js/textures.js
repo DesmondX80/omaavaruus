@@ -1,7 +1,8 @@
-// Planeettojen tekstuurit Avaruuslennon ohjaamonäkymään. Ne piirretään selaimessa canvasille (tasavälinen
-// lieriöprojektio, 512 × 256), joten kuvatiedostoja tai lisenssejä ei tarvita. Maan mantereet tulevat
-// Natural Earthin ääriviivoista (land.js, public domain), muut pinnat ovat tyyliteltyjä: värit ja vyöt vastaavat
-// planeettojen yleisilmettä, mutta yksityiskohdat ovat satunnaisia (kiinteä siemen, joten ne pysyvät samoina).
+// Planeettojen ja kuiden piirretyt tekstuurit Avaruuslennon ohjaamonäkymään (tasavälinen lieriöprojektio, 512 × 256).
+// Ne ovat pohja, joka näkyy heti: ohjaamo (cockpit.js) vaihtaa tilalle valokuvatekstuurin hakemistosta textures/,
+// kun kohde tulee lähelle. Ilman verkkoa ja Titanilla (utukerros peittää pinnan) piirretty tekstuuri jää näkyviin.
+// Maan mantereet tulevat Natural Earthin ääriviivoista (land.js, public domain), muut pinnat ovat tyyliteltyjä:
+// värit ja vyöt vastaavat yleisilmettä, mutta yksityiskohdat ovat satunnaisia (kiinteä siemen, joten ne pysyvät samoina).
 import { LAND } from './land.js';
 
 const W = 512, H = 256;
@@ -148,7 +149,13 @@ const PAINTERS = {
     for(let i=0;i<70;i++) {ctx.lineWidth=0.5+rnd()*1.5; ctx.beginPath(); const x=rnd()*W, y=rnd()*H; ctx.moveTo(x,y); ctx.quadraticCurveTo(x+(rnd()-0.5)*200,y+(rnd()-0.5)*80,x+(rnd()-0.5)*300,y+(rnd()-0.5)*100); ctx.stroke();}
   },
   Ganymedes(ctx, rnd) { cratered(ctx,rnd,'#9d9384','#6a6156',[['#c8c0b2',40,10,40]]); },
-  Titan(ctx, rnd) { bands(ctx,rnd,[[2,'#c98f3c'],[3,'#d9a54e'],[3,'#dcaa55'],[2,'#cf9844']],3); },
+  Titan(ctx, rnd) {
+    // Paksu oranssi utukerros peittää pinnan: tasainen liuku, pohjoisnavalla tummempi huppu.
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#b07a34'); g.addColorStop(0.18,'#cf9844'); g.addColorStop(0.5,'#dcaa55'); g.addColorStop(1,'#d2a04c');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    blotches(ctx,rnd,24,'#e6b866',40,90,0.08,0.7);
+  },
   Enceladus(ctx, rnd) { cratered(ctx,rnd,'#eef2f6','#cdd6df',[['#bfd8ea',20,5,20]]); },
   Triton(ctx, rnd) {
     ctx.fillStyle='#d9c6bf'; ctx.fillRect(0,0,W,H);

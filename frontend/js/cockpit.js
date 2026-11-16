@@ -17,6 +17,8 @@ const OBLIQUITY = 23.4393*Math.PI/180;
 const STAR_DISTANCE = 1e16;
 // Pyörähdysajat tunteina (negatiivinen = takaperoinen).
 const SPIN_HOURS = {Merkurius:1407.6, Venus:-5832.5, Maa:23.934, Mars:24.623, Jupiter:9.925, Saturnus:10.656, Uranus:-17.24, Neptunus:16.11};
+// Pyörähdysakselien pohjoisnavat (IAU, J2000): [rektaskensio°, deklinaatio°]. Kuiden akselit ovat pystyssä.
+const POLES = {Merkurius:[281.01,61.41], Venus:[272.76,67.16], Maa:[0,90], Mars:[317.68,52.89], Jupiter:[268.06,64.5], Saturnus:[40.59,83.54], Uranus:[257.31,-15.18], Neptunus:[299.36,43.46]};
 const SHAKE_MS = 7000;
 
 const toScene = ([x,y,z]) => new THREE.Vector3(x,z,-y);
@@ -31,6 +33,20 @@ function texture(canvas) {
   const t=new THREE.CanvasTexture(canvas);
   t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4;
   return t;
+}
+
+// Valokuvatekstuurit (frontend/textures/, lähteet README:ssä). Kuva haetaan vasta, kun kohde näkyy kiekkona, ja
+// siihen asti (tai jos haku epäonnistuu) pinnalla on textures.js:n piirretty tekstuuri. Titanilla ei ole kuvaa:
+// sen pinta on oranssin utukerroksen peitossa, joten piirretty tekstuuri vastaa sitä, miltä kuu näyttää avaruudesta.
+const PHOTO_BODIES = new Set(['Merkurius','Venus','Maa','Mars','Jupiter','Saturnus','Uranus','Neptunus','Kuu','Phobos','Io','Europa','Ganymedes','Enceladus','Triton']);
+const PHOTO_MIN_PX = 3;
+const loader = new THREE.TextureLoader();
+function loadPhoto(file, material, onLoad) {
+  loader.load(new URL(`../textures/${file}.webp`,import.meta.url).href,t=>{
+    t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8;
+    material.map?.dispose(); material.map=t; material.needsUpdate=true;
+    onLoad();
+  },undefined,()=>{});
 }
 
 // Tähtitaivas: luettelon kirkkaat tähdet oikeista suunnista sekä himmeä tausta, joka tihenee Linnunradan tasoa
@@ -173,17 +189,22 @@ export function createCockpit(host, state) {
     const dotGeo=new THREE.BufferGeometry(); dotGeo.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0],3));
     const dot=new THREE.Points(dotGeo,new THREE.PointsMaterial({color:p.color, size:3.5, sizeAttenuation:false, depthWrite:false}));
     scene.add(mesh,dot);
+    let ringMaterial=null;
     if(p.name==='Saturnus') {
       const inner=FLIGHT_BODIES.Saturnus.radiusKm*1.24*KM, outer=FLIGHT_BODIES.Saturnus.radiusKm*2.27*KM;
       const geo=new THREE.RingGeometry(inner,outer,128,1);
       // Tekstuurin u-koordinaatti säteen mukaan, jotta renkaan raidat kiertävät.
       const pos=geo.attributes.position, uv=geo.attributes.uv;
       for(let i=0;i<pos.count;i++) uv.setXY(i,(Math.hypot(pos.getX(i),pos.getY(i))-inner)/(outer-inner),0.5);
-      const ring=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({map:texture(ringCanvas()), transparent:true, side:THREE.DoubleSide, roughness:1, depthWrite:false}));
-      // Saturnuksen pyörähdysakseli: RA 40,59°, Dec 83,54°.
-      ring.lookAt(toScene(equatorial(40.59/15,83.54))); mesh.add(ring);
+      // Jääkiteet sirottavat valoa joka suuntaan, joten renkaat piirretään ilman pinnan suunnasta riippuvaa varjostusta.
+      ringMaterial=new THREE.MeshBasicMaterial({map:texture(ringCanvas()), transparent:true, side:THREE.DoubleSide, depthWrite:false});
+      const ring=new THREE.Mesh(geo,ringMaterial);
+      // Renkaat ovat päiväntasaajan tasossa ja kallistuvat pallon mukana.
+      ring.rotation.x=-Math.PI/2; mesh.add(ring);
     }
-    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot};
+    const tilt=new THREE.Quaternion();
+    if(POLES[p.name]) tilt.setFromUnitVectors(new THREE.Vector3(0,1,0),toScene(equatorial(POLES[p.name][0]/15,POLES[p.name][1])).normalize());
+    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot, ringMaterial, tilt, photo:!PHOTO_BODIES.has(p.name)};
   });
 
   // Moottorin hehku valaisee ohjaamon laukaisussa takaa.
@@ -220,6 +241,7 @@ export function createCockpit(host, state) {
 
   // Aluksen asento: nokka osoittaa kohteeseen aim, ja asento kääntyy pehmeästi.
   const look=new THREE.Matrix4(), want=new THREE.Quaternion(), origin=new THREE.Vector3(), up=new THREE.Vector3(0,1,0);
+  const spinQ=new THREE.Quaternion();
   let attitudeReady=false;
 
   let running=false, frame=null, lastFrame=0, lastRender=0;
@@ -241,9 +263,17 @@ export function createCockpit(host, state) {
     for(const p of planets) {
       const pos=rel(bodyState(p.name,t).r);
       p.mesh.position.copy(pos); p.dot.position.copy(pos);
-      p.mesh.rotation.y=p.moon ? 2*Math.PI*((t-Date.UTC(2000,0,1,12))/(MOONS[p.name].periodDays*86400000)%1) : 2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
+      const spin=p.moon ? 2*Math.PI*((t-Date.UTC(2000,0,1,12))/(MOONS[p.name].periodDays*86400000)%1) : 2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
+      p.mesh.quaternion.copy(p.tilt).multiply(spinQ.setFromAxisAngle(up,spin));
       // Piste piilotetaan, kun pallo näkyy itse riittävän suurena. Kuun piste näkyy vain alle 20 milj. km päästä.
-      p.dot.visible=p.radiusKm*KM/pos.length()*k<2 && (!p.moon || pos.length()<2e10);
+      const px=p.radiusKm*KM/pos.length()*k;
+      p.dot.visible=px<2 && (!p.moon || pos.length()<2e10);
+      if(!p.photo && px>PHOTO_MIN_PX) {
+        p.photo=true;
+        const loaded=()=>{moved=performance.now();};
+        loadPhoto(p.name.toLowerCase(),p.mesh.material,loaded);
+        if(p.ringMaterial) loadPhoto('saturnus-renkaat',p.ringMaterial,loaded);
+      }
     }
     if(s.aim) {look.lookAt(origin,rel(bodyState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
     else want.copy(ship.quaternion);

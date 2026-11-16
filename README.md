@@ -37,7 +37,7 @@ yksityiskohdat. Paikan valinta ja kaikki ilmoitusasetukset avautuvat yläpalkist
   - **Tutkiminen ja lokikirja**: perillä jarrutetaan kiertoradalle (jos polttoaine ei riitä, alus ohittaa planeetan ja jää Auringon kiertoradalle). Planeetan tietokortissa ovat koko, massa, painovoima, päivän ja vuoden pituus, lämpötila, kaasukehä ja kuut. Vuorokauden kartoituksen jälkeen planeetta on tutkittu, sen faktat paljastuvat ja polttoaine täydennetään. Lokikirjassa ovat lennot, tutkitut planeetat (x/8), kokonaislentoaika, kuljettu matka ja huippunopeus.
   - **Kurssikorjaukset**: lennon aikana moottoria voi polttaa eteen, taakse, sisään tai ulos (10 m/s–1 km/s). Ennuste kertoo ennen polttoa, osuuko alus kohteen vaikutuspiiriin vai ohittaako se kohteen, ja uusi rata näkyy kartalla. Automaattinen korjaus laskee reitin takaisin kohteeseen.
   - **Linkous, kuut ja alukset**: reittihaku ehdottaa myös yhden painovoimalinkouksen reittejä (esim. Maa → Venus → Merkurius), kun ne ovat suoraa lentoa halvempia tai nopeampia. Kohteina ovat myös Kuu, Phobos, Io, Europa, Ganymedes, Titan, Enceladus ja Triton, joihin lennetään emoplaneetan kiertoradalta, ja niillä on omat tietokorttinsa. Maan kiertoradalla voi vaihtaa alusta: kemiallinen raketti (14 km/s), ydinlämpöraketti (22 km/s, vetyä vain Maasta ja kaasujättiläisiltä) tai ionialus (45 km/s, mutta lähtö ja jarrutus ovat kuukausien spiraaleja).
-  - **3D-ohjaamo**: lentoa voi seurata aluksen ikkunasta (WebGL, [three.js](https://threejs.org/) 0.170.0, MIT-lisenssi, tallennettu hakemistoon `frontend/js/vendor/`; ladataan vasta, kun ohjaamo avataan). Tähdet ovat oikeissa suunnissa (kirkkaat tähdet samasta luettelosta kuin taivaankartassa, himmeä tausta tihenee Linnunradan tasoa kohti), ja Aurinko ja planeetat ovat oikeassa suunnassa ja näennäisessä koossa. Kojelaudan näytöillä ovat lentoaika, nopeus, etäisyys ja polttoaine. Katsetta käännetään raahaamalla tai asentoantureilla. Planeettojen tekstuurit piirretään selaimessa (Maan mantereet Natural Earth 110m, public domain; muut tyyliteltyjä), joten kuvatiedostoja tai muita lisenssejä ei ole. Jos WebGL ei toimi, näytetään kartta.
+  - **3D-ohjaamo**: lentoa voi seurata aluksen ikkunasta (WebGL, [three.js](https://threejs.org/) 0.170.0, MIT-lisenssi, tallennettu hakemistoon `frontend/js/vendor/`; ladataan vasta, kun ohjaamo avataan). Tähdet ovat oikeissa suunnissa (kirkkaat tähdet samasta luettelosta kuin taivaankartassa, himmeä tausta tihenee Linnunradan tasoa kohti), ja Aurinko ja planeetat ovat oikeassa suunnassa ja näennäisessä koossa. Kojelaudan näytöillä ovat lentoaika, nopeus, etäisyys ja polttoaine. Katsetta käännetään raahaamalla tai asentoantureilla. Planeettojen ja kuiden pinnat ovat luotainkuvista koottuja karttoja (`frontend/textures/`, ks. [Tekstuurien lähteet](#tekstuurien-lähteet)), jotka haetaan vasta, kun kohde näkyy kiekkona. Siihen asti ja ilman verkkoa näkyy selaimessa piirretty tyylitelty pinta (Maan mantereet Natural Earth 110m, public domain). Titan on piirretty, koska sen pinta on utukerroksen peitossa. Jos WebGL ei toimi, näytetään kartta.
 - **ISS-ylilennot**: ISS:n ja Kiinan Tiangong-aseman sijainti ja näkyvät ylilennot viideksi vuorokaudeksi valitulle paikalle (CelesTrakin ratatiedot, SGP4 [satellite.js](https://github.com/shashwatak/satellite-js):llä). Näkyvyys vaatii, että asema on auringonvalossa ja taivas hämärä. Lähimpien kolmen vuorokauden ylilennoille ja tapahtumille näytetään pilvisyysennuste. Pyöritettävä ja zoomattava maapallokartta näyttää aseman sijainnin ja radan nyt tai valitun ylilennon reitin havaintopaikan ympäristössä, ja sen saa myös koko näytölle. Asema näkyy myös taivaankartalla, jolle seuraava näkyvä ylilento piirretään kaarena, ja näkyvästä ylilennosta voi saada push-ilmoituksen.
 - **Taivaan tapahtumat**: seuraavan vuoden meteoriparvet (staattinen luettelo), kuun- ja auringonpimennykset sekä planeettojen konjunktiot astronomy-enginellä laskettuna. Jokaiselle tapahtumalle arvioidaan näkyvyys valitulta paikalta ja paras havaintohetki. Kalenterissa ovat myös Kuun vaiheet ja kuuttomat yöt.
 - **Yövalaistus**: yläpalkin silmäpainike muuttaa koko näytön punaiseksi ja himmeäksi, jotta pimeänäkö säilyy ulkona. Kattaa myös kartat ja kamerakuvan.
@@ -72,6 +72,7 @@ frontend/
   index.html, styles.css, config.js (API-osoite)
   manifest.webmanifest, icons/   # PWA-manifesti ja kuvakkeet (icon.svg on lähde, PNG:t siitä piirrettyjä)
   sw.js              # service worker: verkko ensin, ilman verkkoa välimuisti
+  textures/          # Avaruuslennon planeettojen ja kuiden pintakartat (WebP, lähteet alla)
   js/                # ES-moduulit ilman käännösvaihetta
     main.js          # käynnistys ja ajastukset
     core.js          # jaettu tila, API-kutsut, haettujen tietojen välitys näkymille, apufunktiot
@@ -81,6 +82,20 @@ frontend/
     calendar.js      # taivaan tapahtumat ja laukaisut samalla aikajanalla
     weather.js, solarwind.js, land.js, sky.js, skychart.js, skyview.js, iss.js, issmap.js, events.js, launches.js, places.js, push.js, info.js
 ```
+
+## Tekstuurien lähteet
+
+Avaruuslennon ohjaamon pintakartat ovat hakemistossa `frontend/textures/` (tasavälinen lieriöprojektio, enintään 2048 × 1024, WebP).
+
+| Kohde | Lähde | Lisenssi |
+| --- | --- | --- |
+| Merkurius, Venus (pilvikerros), Maa, Mars, Jupiter, Saturnus ja renkaat, Uranus, Neptunus, Kuu | [Solar System Scope](https://www.solarsystemscope.com/textures/), NASAn aineistoon perustuvat kartat. Maan karttaan on yhdistetty saman lähteen pilvikartta. | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Phobos | Viking-luotainten mosaiikki, NASA/JPL/USGS ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Phobos_Viking_Mosaic_DLRcontrol_7200.jpg)); sävytetty ruskeanharmaaksi | public domain |
+| Io | Voyager- ja Galileo-luotainten mosaiikki PIA00319, NASA/JPL/USGS ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Io_map_projection_PIA00319.jpg)) | public domain |
+| Europa | Seek9750: Moon Europa color map ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Moon_Europa_color_map.jpg)), NASAn kuvista | CC0 |
+| Ganymedes | Björn Jónsson: Map of Ganymede, NASAn kuvista ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Map_of_Ganymede_by_Bj%C3%B6rn_J%C3%B3nsson.jpg)) | vapaa käyttö, tekijä mainittava |
+| Enceladus | Cassini-luotaimen värikartta PIA18435, NASA/JPL-Caltech/SSI/LPI ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Enceladus_Color_Map.jpg)) | public domain |
+| Triton | Voyager 2:n värikartta PIA18668, NASA/JPL-Caltech/LPI ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Triton_Map.jpg)). Voyager kuvasi vain osan pinnasta: kuvaamaton pohjoinen alue on täytetty ympäristön sumennetulla värillä, ja tehostettuja värejä on haalistettu. | public domain |
 
 ## Julkaisu
 
