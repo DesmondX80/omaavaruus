@@ -8,7 +8,7 @@
 // Koordinaatit: ekliptikan (x, y, z) → three.js (x, z, −y), eli ekliptikan pohjoisnapa on ylöspäin.
 import * as THREE from './vendor/three-0.170.0.module.min.js';
 import { FLIGHT_BODIES, MOONS, bodyState } from './flight.js';
-import { PLANETS, SUN_RADIUS_KM } from './planets.js';
+import { AU_KM, PLANETS, SUN_RADIUS_KM } from './planets.js';
 import { BRIGHT_STARS } from './stars.js';
 import { buildCabin, display, screen } from './cabin.js';
 import { glowCanvas, planetCanvas, ringCanvas } from './textures.js';
@@ -21,6 +21,7 @@ const SPIN_HOURS = {Merkurius:1407.6, Venus:-5832.5, Maa:23.934, Mars:24.623, Ju
 // Pyörähdysakselien pohjoisnavat (IAU, J2000): [rektaskensio°, deklinaatio°]. Kuiden akselit ovat pystyssä.
 const POLES = {Merkurius:[281.01,61.41], Venus:[272.76,67.16], Maa:[0,90], Mars:[317.68,52.89], Jupiter:[268.06,64.5], Saturnus:[40.59,83.54], Uranus:[257.31,-15.18], Neptunus:[299.36,43.46]};
 const SHAKE_MS = 7000;
+const WHITE = new THREE.Color(0xffffff);
 
 const toScene = ([x,y,z]) => new THREE.Vector3(x,z,-y);
 function equatorial(raHours, decDeg) {
@@ -139,6 +140,7 @@ export function createCockpit(host, state) {
   const renderer=new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true});
   renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
   renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.autoClear=false; renderer.toneMappingExposure=1.3;
   host.append(renderer.domElement);
   renderer.domElement.className='voyage-cockpit-canvas';
 
@@ -179,7 +181,7 @@ export function createCockpit(host, state) {
     }
     const tilt=new THREE.Quaternion();
     if(POLES[p.name]) tilt.setFromUnitVectors(new THREE.Vector3(0,1,0),toScene(equatorial(POLES[p.name][0]/15,POLES[p.name][1])).normalize());
-    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot, ringMaterial, tilt, level:0, ring:false};
+    return {name:p.name, radiusKm:p.radiusKm, color:p.color, moon:p.moon, mesh, dot, ringMaterial, tilt, level:0, ring:false};
   });
 
   // Tekstuurin tarkkuustaso: 0 piirretty, 1 peruskartta (2k), 2 tarkka kartta. Tarkan kartan leveys rajataan laitteen
@@ -201,18 +203,46 @@ export function createCockpit(host, state) {
     }
   }
 
-  // Moottorin hehku valaisee ohjaamon laukaisussa takaa.
-  // Valojen kantama on rajattu muutamaan metriin, jotta ne eivät valaise planeettoja.
-  const engine=new THREE.PointLight(0xff8a3a,0,6,2);
-  engine.position.set(0,-0.6,1.6); ship.add(engine);
-  const interior=new THREE.PointLight(0x9fb8ff,0.8,5,1);
-  interior.position.set(0,0.6,0.3); ship.add(interior);
-
+  // Ohjaamo piirretään omana näkymänään avaruuden päälle, aluksen omassa koordinaatistossa. Näin sen valot eivät
+  // valaise planeettoja, ja varjokartan syvyystarkkuus riittää: avaruuden mittakaavassa (miljardeja kilometrejä)
+  // muutaman metrin varjoja ei voisi laskea.
+  const cabinScene=new THREE.Scene(), cabinCamera=new THREE.PerspectiveCamera(70,1,0.02,40);
+  cabinScene.add(cabinCamera);
   const screens=[display(),display(),display()], nav=screen(512,288), systems=screen(512,288);
-  ship.add(buildCabin(screens,nav,systems));
-  // Näyttöjen hohde valaisee kojelautaa ja lentäjän puolta ohjaamosta.
-  const screenGlow=new THREE.PointLight(0x5ed6ff,0.35,3,1.5);
-  screenGlow.position.set(0,-0.25,-0.75); ship.add(screenGlow);
+  const cabin=buildCabin(screens,nav,systems);
+  cabin.traverse(o=>{
+    if(!o.isMesh) return;
+    o.castShadow=!o.material.transparent;
+    o.receiveShadow=!o.material.isMeshBasicMaterial;
+  });
+  cabinScene.add(cabin);
+  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  // Auringonvalo ikkunoista: suunta lasketaan joka ruudulla Auringon suunnasta aluksen koordinaatistossa, ja kehyksen
+  // tuet heittävät varjonsa konsolille ja lattialle. Varjokartta lasketaan uudelleen vain, kun suunta muuttuu.
+  const sunBeam=new THREE.DirectionalLight(0xfff4e2,3);
+  sunBeam.castShadow=true;
+  sunBeam.shadow.mapSize.setScalar(matchMedia('(pointer: coarse)').matches ? 1024 : 2048);
+  Object.assign(sunBeam.shadow.camera,{left:-3,right:3,top:3,bottom:-3,near:1,far:16});
+  sunBeam.shadow.camera.updateProjectionMatrix();
+  sunBeam.shadow.bias=-0.0006; sunBeam.shadow.normalBias=0.02; sunBeam.shadow.radius=3;
+  sunBeam.shadow.autoUpdate=false;
+  // Lähellä olevan planeetan tai kuun heijastama valo: väri kohteen mukaan, voimakkuus sen näennäisen koon ja vaiheen mukaan.
+  const shine=new THREE.DirectionalLight(0xffffff,0);
+  // Sisävalaistus: himmeä yleisvalo, kattovalot, näyttöjen hohde ja laukaisussa takaa loistava moottorin hehku.
+  // bounce on ikkunoista sisään tulevan auringonvalon heijastuma ohjaamon pinnoista: sitä ei lasketa säteittäin, vaan
+  // sen voimakkuus arvioidaan siitä, kuinka suoraan Aurinko paistaa etu- ja sivuikkunoihin.
+  const fill=new THREE.HemisphereLight(0xb4bccb,0x1b1c20,0.34);
+  const bounce=new THREE.HemisphereLight(0xfff0dc,0x4a4640,0);
+  const ceiling=new THREE.PointLight(0xffe9cf,1.5,6,1.4);
+  ceiling.position.set(0,0.9,-0.1);
+  const screenGlow=new THREE.PointLight(0x5ed6ff,0.3,2.4,1.5);
+  screenGlow.position.set(0,-0.3,-0.8);
+  const towerGlow=new THREE.PointLight(0x4fb8ff,0.2,1.2,1.5);
+  towerGlow.position.set(0,-0.36,-1.25);
+  const engine=new THREE.PointLight(0xff8a3a,0,6,2);
+  engine.position.set(0,-0.6,1.6);
+  cabinScene.add(sunBeam,sunBeam.target,shine,shine.target,fill,bounce,ceiling,screenGlow,towerGlow,engine);
+  const sunLocal=new THREE.Vector3(), lastSun=new THREE.Vector3(), inverse=new THREE.Quaternion(), shineLocal=new THREE.Vector3(), toSun=new THREE.Vector3();
 
   // Katse: raahaus kääntää päätä ohjaamossa, asentoanturit lisäävät puhelimen kääntymisen.
   let yaw=0, pitch=-0.05, dragging=null, orientation=null, orientationBase=null, moved=0;
@@ -246,9 +276,10 @@ export function createCockpit(host, state) {
     const w=host.clientWidth, h=host.clientHeight;
     if(!w||!h) return;
     const size=renderer.getSize(new THREE.Vector2());
-    if(size.x!==w||size.y!==h) {renderer.setSize(w,h,false); camera.aspect=w/h;
+    if(size.x!==w||size.y!==h) {renderer.setSize(w,h,false); camera.aspect=cabinCamera.aspect=w/h;
       // Pystykulma valitaan niin, että kojelaudan kolme näyttöä ja kattonäytöt mahtuvat kuvaan myös kapeammassa ikkunassa.
-      camera.fov=Math.max(65,Math.min(80,2*Math.atan(Math.tan(48*Math.PI/180)/(w/h))*180/Math.PI)); camera.updateProjectionMatrix(); return true;}
+      camera.fov=Math.max(65,Math.min(80,2*Math.atan(Math.tan(48*Math.PI/180)/(w/h))*180/Math.PI)); camera.updateProjectionMatrix();
+      cabinCamera.fov=camera.fov; cabinCamera.updateProjectionMatrix(); return true;}
     return false;
   }
 
@@ -260,8 +291,10 @@ export function createCockpit(host, state) {
     sunCore.position.copy(sun); sunLight.position.copy(sun);
     sunGlow.position.copy(sun); sunGlow.scale.setScalar(sun.length()*0.16);
     const k=renderer.domElement.clientHeight/2/Math.tan(camera.fov*Math.PI/360);
+    let nearest=null, nearestSize=0;
     for(const p of planets) {
       const pos=rel(bodyState(p.name,t).r);
+      if(p.radiusKm*KM/pos.length()>nearestSize) {nearestSize=p.radiusKm*KM/pos.length(); nearest=p;}
       p.mesh.position.copy(pos); p.dot.position.copy(pos);
       const spin=p.moon ? 2*Math.PI*((t-Date.UTC(2000,0,1,12))/(MOONS[p.name].periodDays*86400000)%1) : 2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
       p.mesh.quaternion.copy(p.tilt).multiply(spinQ.setFromAxisAngle(up,spin));
@@ -287,6 +320,24 @@ export function createCockpit(host, state) {
     const age=s.launchAge, rumble=age<SHAKE_MS ? 1-age/SHAKE_MS : s.countdown!=null && s.countdown<1500 ? 0.4 : 0;
     camera.position.set((Math.random()-0.5)*0.03*rumble,(Math.random()-0.5)*0.03*rumble,0);
     engine.intensity=rumble*18*(0.85+Math.random()*0.3);
+    cabinCamera.position.copy(camera.position); cabinCamera.quaternion.copy(head.quaternion);
+
+    // Auringonvalo ohjaamossa: suunta aluksen koordinaatistossa, kirkkaus himmenee loivasti etäisyyden kasvaessa
+    // (todellinen 1/r²-lasku jättäisi ulkoplaneetoilla ohjaamon lähes pimeäksi).
+    inverse.copy(ship.quaternion).invert();
+    sunLocal.copy(sun).normalize().applyQuaternion(inverse);
+    sunBeam.position.copy(sunLocal).multiplyScalar(8);
+    sunBeam.intensity=3.4*Math.max(0.3,Math.min(1.3,Math.sqrt(AU_KM*KM/sun.length())));
+    if(sunLocal.distanceToSquared(lastSun)>1e-7) {lastSun.copy(sunLocal); sunBeam.shadow.needsUpdate=true;}
+    bounce.intensity=sunBeam.intensity*0.22*Math.max(0,Math.min(1,-sunLocal.z*0.9+Math.abs(sunLocal.x)*0.5+sunLocal.y*0.2));
+    // Lähimmän kappaleen heijastama valo: valaistun puolen osuus (vaihe) kertaa kiekon peittämä osuus taivaasta.
+    if(nearest && nearestSize>0.02) {
+      const pos=nearest.mesh.position;
+      const phase=(1+toSun.copy(sun).sub(pos).normalize().dot(shineLocal.copy(pos).normalize().negate()))/2;
+      shine.color.set(nearest.color).lerp(WHITE,0.45);
+      shine.intensity=Math.min(1.6,6*Math.min(1,nearestSize)**2*phase+0.5*Math.min(1,nearestSize)*phase);
+      shine.position.copy(shineLocal.copy(pos).normalize().applyQuaternion(inverse)).multiplyScalar(8);
+    } else shine.intensity=0;
 
     const [a,b,c]=s.screens;
     screens[0].draw(...a); screens[1].draw(...b); screens[2].draw(...c);
@@ -308,7 +359,13 @@ export function createCockpit(host, state) {
     const resized=resize();
     const active=update(now);
     lastFrame=now;
-    if(active || resized || now-lastRender>250) {renderer.render(scene,camera); lastRender=now;}
+    if(active || resized || now-lastRender>250) {
+      // Ensin avaruus ilman sävykuvausta, sitten ohjaamo sen päälle omalla syvyyspuskurillaan.
+      renderer.toneMapping=THREE.NoToneMapping; renderer.render(scene,camera);
+      renderer.clearDepth();
+      renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.render(cabinScene,cabinCamera);
+      lastRender=now;
+    }
     frame=requestAnimationFrame(loop);
   }
 

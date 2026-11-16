@@ -322,6 +322,8 @@ export function buildCabin(main, nav, systems) {
   }
   box(root,4.3,2.4,0.08,hull,0,-0.1,1.2);
   plane(root,4.4,3.0,floor,0,-1.3,-0.2,-Math.PI/2,0);
+  // Pohjalevy lattian alla, jotta alapuolelta paistava Aurinko ei valaise ohjaamoa lattian läpi.
+  box(root,4.4,0.06,3.0,hull,0,-1.34,-0.2);
   box(root,4.3,0.06,2.6,hull,0,1.03,0);
   // Kattopaneeli ja valot (näkyvät, kun katsoo ylös).
   plane(root,0.95,0.42,panel(608,272,11,3,1),0,0.988,-0.72,Math.PI/2,0);
