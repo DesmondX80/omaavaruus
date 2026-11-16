@@ -334,6 +334,8 @@ html.nightvision { background: #000; }
 .voyage-cockpit-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 .voyage-cockpit .sky-btn { min-height: 32px; background: rgba(5,7,15,.7); }
 .voyage-cockpit .sky-btn[hidden] { display: none; }
+/* Kangas lisätään painikkeiden jälkeen, joten painikkeet nostetaan sen päälle. */
+.voyage-cockpit .iss-map-modes { z-index: 1; }
 .voyage-info { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-card); }
 .voyage-info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
 .voyage-info dt { color: var(--muted); }
@@ -349,3 +351,14 @@ html.nightvision { background: #000; }
 .voyage-flights li { display: grid; gap: 1px; padding-top: 6px; border-top: 1px solid var(--line); }
 .voyage-ships { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
 .voyage-ships button { font-size: 12px; }
+#voyage-full[hidden] { display: none; }
+/* Leveällä näytöllä ohjaamo tai kartta täyttää ikkunan ja ohjaimet ovat oikean reunan paneelissa. Näkymä asemoidaan
+   pelin (.voyage) suhteen, joten se pysyy paikallaan, kun paneelia vieritetään. */
+@media (min-width: 1000px) and (min-height: 480px) {
+  .voyage { --voyage-top: 59px; --voyage-side: 420px; }
+  .voyage-top { height: var(--voyage-top); box-sizing: border-box; }
+  .voyage-body { width: var(--voyage-side); max-width: none; margin: 0 0 0 auto; border-left: 1px solid var(--line); }
+  .voyage-cockpit, .voyage-map-stage { position: absolute; left: 0; top: var(--voyage-top); bottom: 0; width: calc(100% - var(--voyage-side)); height: auto; min-height: 0; max-height: none;
+    aspect-ratio: auto; margin: 0; border-radius: 0; }
+  .voyage-map { border-radius: 0; }
+}

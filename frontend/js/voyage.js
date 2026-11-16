@@ -825,7 +825,15 @@ function close() {
   if(el('voyage').hidden) return;
   park();
   el('voyage').hidden=true; document.body.classList.remove('sky-locked');
+  if(ownFullscreen && document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  ownFullscreen=false;
   syncCockpit();
+}
+// Selaimen koko näytön tila. Kohteena on koko sivu eikä pelin elementti, jotta pelin päälle avautuvat paneelit näkyvät.
+let ownFullscreen=false;
+function toggleFullscreen() {
+  if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  else document.documentElement.requestFullscreen().then(()=>{ownFullscreen=true;}).catch(()=>{});
 }
 // Sulkeminen palaa edelliseen näkymään, jos peli avattiin sovelluksesta; suoralla linkillä taivasnäkymään.
 function leave() {
@@ -837,6 +845,12 @@ const sync = () => location.hash==='#lento' ? open() : close();
 export function initVoyage() {
   el('voyage-open').addEventListener('click',()=>{history.pushState({voyage:true},'','#lento'); open();});
   el('voyage-close').addEventListener('click',leave);
+  el('voyage-full').hidden=!document.fullscreenEnabled;
+  el('voyage-full').addEventListener('click',toggleFullscreen);
+  document.addEventListener('fullscreenchange',()=>{
+    if(!document.fullscreenElement) ownFullscreen=false;
+    el('voyage-full').setAttribute('aria-pressed',String(!!document.fullscreenElement));
+  });
   window.addEventListener('hashchange',sync);
   window.addEventListener('popstate',sync);
   document.addEventListener('keydown',e=>{if(e.key==='Escape' && !el('voyage').hidden) leave();});
