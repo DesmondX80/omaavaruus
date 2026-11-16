@@ -51,7 +51,7 @@ const BURN_DIRS = [['prograde','Eteen'],['retrograde','Taakse'],['inward','Sisä
 const BURN_SIZES = [[0.01,'10 m/s'],[0.05,'50 m/s'],[0.1,'100 m/s'],[0.5,'500 m/s'],[1,'1 km/s']];
 // 3D-ohjaamo (cockpit.js) ladataan vasta, kun se näytetään ensimmäisen kerran. Sen kangas säilyy elementissä
 // cockpitHost, jota siirretään näkymästä toiseen, joten WebGL-kontekstia ei luoda uudelleen.
-const VIEW_KEY = 'avaruuslento.view';
+const VIEW_KEY = 'avaruuslento.view', PANEL_KEY = 'avaruuslento.panel';
 let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, launchedAt=-Infinity;
 
 // --- Kello ---
@@ -349,8 +349,11 @@ function waiting(body) {
   }
 }
 
+// Kartta piirretään uudelleen aina, kun sen koko muuttuu (ikkunan koko, sivupaneelin liuku).
+const mapObserver=typeof ResizeObserver==='undefined' ? null : new ResizeObserver(()=>draw());
 function mapStage() {
   const stage=make('div','voyage-map-stage'), canvas=make('canvas','voyage-map');
+  mapObserver?.disconnect(); mapObserver?.observe(stage);
   canvas.id='voyage-map'; canvas.setAttribute('role','img'); canvas.setAttribute('aria-label','Aluksen rata aurinkokunnan kartalla');
   const modes=make('div','iss-map-modes');
   for(const [label,follow] of [['Koko rata',false],['Alus',true]]) {
@@ -829,6 +832,19 @@ function close() {
   ownFullscreen=false;
   syncCockpit();
 }
+// Leveän näytön sivupaneelin piilotus: paneeli liukuu oikealle ja ohjaamo tai kartta levenee koko ikkunaan (styles.css).
+// Kartta piirtyy liu'un aikana uudelleen koon muuttuessa (mapObserver).
+let panelHidden=saved.get(PANEL_KEY,'')==='hidden';
+function syncPanel() {
+  el('voyage').classList.toggle('voyage-panel-hidden',panelHidden);
+  const b=el('voyage-panel');
+  b.setAttribute('aria-expanded',String(!panelHidden));
+  b.setAttribute('aria-label',panelHidden ? 'Näytä sivupaneeli' : 'Piilota sivupaneeli');
+}
+function togglePanel() {
+  panelHidden=!panelHidden; saved.set(PANEL_KEY,panelHidden ? 'hidden' : '');
+  syncPanel();
+}
 // Selaimen koko näytön tila. Kohteena on koko sivu eikä pelin elementti, jotta pelin päälle avautuvat paneelit näkyvät.
 let ownFullscreen=false;
 function toggleFullscreen() {
@@ -845,6 +861,8 @@ const sync = () => location.hash==='#lento' ? open() : close();
 export function initVoyage() {
   el('voyage-open').addEventListener('click',()=>{history.pushState({voyage:true},'','#lento'); open();});
   el('voyage-close').addEventListener('click',leave);
+  el('voyage-panel').addEventListener('click',togglePanel);
+  syncPanel();
   el('voyage-full').hidden=!document.fullscreenEnabled;
   el('voyage-full').addEventListener('click',toggleFullscreen);
   document.addEventListener('fullscreenchange',()=>{

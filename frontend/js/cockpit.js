@@ -247,7 +247,8 @@ export function createCockpit(host, state) {
     const size=renderer.getSize(new THREE.Vector2());
     if(size.x!==w||size.y!==h) {renderer.setSize(w,h,false); camera.aspect=w/h;
       // Pystykulma valitaan niin, että kojelaudan kolme näyttöä ja kattonäytöt mahtuvat kuvaan myös kapeammassa ikkunassa.
-      camera.fov=Math.max(65,Math.min(80,2*Math.atan(Math.tan(48*Math.PI/180)/(w/h))*180/Math.PI)); camera.updateProjectionMatrix();}
+      camera.fov=Math.max(65,Math.min(80,2*Math.atan(Math.tan(48*Math.PI/180)/(w/h))*180/Math.PI)); camera.updateProjectionMatrix(); return true;}
+    return false;
   }
 
   function update(now) {
@@ -302,10 +303,11 @@ export function createCockpit(host, state) {
   function loop(now) {
     frame=null;
     if(!running || document.hidden) return;
-    resize();
+    // Koon muutos tyhjentää kankaan, joten se piirretään heti uudelleen (esim. sivupaneelin liukuessa).
+    const resized=resize();
     const active=update(now);
     lastFrame=now;
-    if(active || now-lastRender>250) {renderer.render(scene,camera); lastRender=now;}
+    if(active || resized || now-lastRender>250) {renderer.render(scene,camera); lastRender=now;}
     frame=requestAnimationFrame(loop);
   }
 

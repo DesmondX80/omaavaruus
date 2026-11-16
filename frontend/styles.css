@@ -352,6 +352,7 @@ html.nightvision { background: #000; }
 .voyage-ships { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
 .voyage-ships button { font-size: 12px; }
 #voyage-full[hidden] { display: none; }
+#voyage-panel { display: none; }
 /* Leveällä näytöllä ohjaamo tai kartta täyttää ikkunan ja ohjaimet ovat oikean reunan paneelissa. Näkymä asemoidaan
    pelin (.voyage) suhteen, joten se pysyy paikallaan, kun paneelia vieritetään. */
 @media (min-width: 1000px) and (min-height: 480px) {
@@ -361,4 +362,17 @@ html.nightvision { background: #000; }
   .voyage-cockpit, .voyage-map-stage { position: absolute; left: 0; top: var(--voyage-top); bottom: 0; width: calc(100% - var(--voyage-side)); height: auto; min-height: 0; max-height: none;
     aspect-ratio: auto; margin: 0; border-radius: 0; }
   .voyage-map { border-radius: 0; }
+  /* Sivupaneelin piilotus: paneeli liukuu oikealle ulos ja näkymä levenee samassa tahdissa. Liuku tehdään marginaalilla
+     eikä transformilla, koska näkymä on paneelin sisällä ja transform siirtäisi senkin. Paneelin muu sisältö poistetaan
+     näkyvistä vasta liu'un jälkeen, jotta sen painikkeisiin ei pääse sarkaimella. */
+  #voyage-panel { display: inline-block; }
+  .voyage-body { transition: margin-right .32s ease; }
+  .voyage-cockpit, .voyage-map-stage { transition: width .32s ease; }
+  .voyage-panel-hidden .voyage-body { margin-right: calc(-1 * var(--voyage-side)); overflow: hidden; }
+  .voyage-panel-hidden .voyage-body > :not(.voyage-cockpit):not(.voyage-map-stage) { visibility: hidden; transition: visibility 0s .32s; }
+  .voyage-panel-hidden .voyage-cockpit, .voyage-panel-hidden .voyage-map-stage { width: 100%; }
+  .voyage-panel-hidden #voyage-panel { color: var(--accent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voyage-body, .voyage-cockpit, .voyage-map-stage { transition: none !important; }
 }
