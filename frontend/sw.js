@@ -9,7 +9,7 @@ const DATA_MAX_ENTRIES = 30;
 const VIEWS = ["nyt", "revontulet", "taivas", "iss", "kalenteri"];
 
 // Sovelluksen tiedostot, jotka haetaan talteen heti asennuksessa (testi varmistaa, että lista kattaa frontend-hakemiston).
-// Avaruuslennon valokuvatekstuurit (textures/, noin 27 Mt) eivät ole listalla: ne talletetaan vasta, kun ohjaamo hakee ne.
+// Avaruuslennon valokuvatekstuurit (textures/, noin 41 Mt) eivät ole listalla: ne talletetaan vasta, kun ohjaamo hakee ne.
 const SHELL = [
   "./",
   "styles.css",

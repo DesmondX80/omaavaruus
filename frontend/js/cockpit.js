@@ -41,7 +41,8 @@ function texture(canvas) {
 // sen pinta on oranssin utukerroksen peitossa, joten piirretty tekstuuri vastaa sitä, miltä kuu näyttää avaruudesta.
 const PHOTO_BODIES = new Set(['Merkurius','Venus','Maa','Mars','Jupiter','Saturnus','Uranus','Neptunus','Kuu','Phobos','Io','Europa','Ganymedes','Enceladus','Triton']);
 // Tarkemmat kartat, jotka haetaan vasta lähellä kohdetta: suurin saatavilla oleva leveys (4096 tai 8192 pikseliä).
-const HIRES = {Merkurius:8192, Venus:4096, Maa:8192, Mars:8192, Jupiter:4096, Saturnus:4096, Kuu:8192};
+const HIRES = {Merkurius:8192, Venus:4096, Maa:8192, Mars:8192, Jupiter:4096, Saturnus:4096, Kuu:8192,
+  Phobos:4096, Io:8192, Europa:8192, Ganymedes:8192, Enceladus:8192, Triton:4096};
 // Kiekon säde ruudulla (CSS-pikseleinä), jolla kuva haetaan, jolla vaihdetaan tarkkaan karttaan ja jolla palataan takaisin.
 const PHOTO_MIN_PX = 3, HIRES_PX = 200, HIRES_BACK_PX = 120;
 const loader = new THREE.TextureLoader();
