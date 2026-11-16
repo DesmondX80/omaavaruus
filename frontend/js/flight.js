@@ -14,18 +14,19 @@ const DAY_MS = DAY_S*1000;
 export const FUEL_KMS = 14;
 
 // Planeettojen gravitaatioparametrit (km³/s²) ja kiertoradat, joilla alus pysäköidään: [perikeskuksen ja apokeskuksen korkeus km].
-// Venus, Maa ja Mars kierretään matalalla ympyräradalla. Merkuriukselle saavutaan Auringon läheltä suurella
-// ylinopeudella, joten sen kaappausrata on hieman venynyt. Jättiläisplaneetoilla kaapataan venyneelle radalle,
-// kuten luotaimet tekevät, koska matalalle ympyräradalle jarruttaminen veisi kymmeniä km/s.
+// Kiviplaneetoilla alus jarruttaa matalalle ympyräradalle noin 500 km korkeuteen; Maassa rata on 200 km, jonne
+// kantoraketti nostaa aluksen. Jättiläisplaneetoilla perikeskus on heti pilvien yläpuolella (Juno ohittaa Jupiterin
+// noin 4 000 km:n ja Cassini ohitti Saturnuksen noin 3 000 km:n korkeudelta), mutta rata on venynyt: matalalle
+// ympyräradalle jarruttaminen veisi 7–17 km/s, eikä sieltä pääsisi enää pois.
 const BODIES = {
-  Merkurius: {mu:22031.86, orbit:[200,10000]},
-  Venus: {mu:324858.59, orbit:[300,300]},
+  Merkurius: {mu:22031.86, orbit:[500,500]},
+  Venus: {mu:324858.59, orbit:[500,500]},
   Maa: {mu:398600.44, orbit:[200,200]},
-  Mars: {mu:42828.37, orbit:[300,300]},
-  Jupiter: {mu:126686531.9, orbit:[70000,2000000]},
-  Saturnus: {mu:37931206.2, orbit:[60000,1500000]},
-  Uranus: {mu:5793951.3, orbit:[25000,500000]},
-  Neptunus: {mu:6835099.5, orbit:[25000,500000]},
+  Mars: {mu:42828.37, orbit:[500,500]},
+  Jupiter: {mu:126686531.9, orbit:[5000,2000000]},
+  Saturnus: {mu:37931206.2, orbit:[3000,1500000]},
+  Uranus: {mu:5793951.3, orbit:[3000,500000]},
+  Neptunus: {mu:6835099.5, orbit:[3000,500000]},
 };
 
 /**
@@ -461,15 +462,93 @@ export function soiExit(tr) {
   return hi;
 }
 
+const J2000 = Date.UTC(2000,0,1,12);
 /**
- * Aluksen paikka ja nopeus pysäköintiradalla planeetan ympärillä hetkellä time (ms). Rata on ekliptikan tasossa
- * ja alkaa perikeskuksesta J2000-hetkellä, joten se on aina sama.
+ * Aluksen paikka ja nopeus pysäköintiradalla planeetan tai kuun ympärillä hetkellä time (ms). Rata on ekliptikan
+ * tasossa. orbit = {epoch, arg}: perikeskuksen ohitushetki (ms) ja perikeskuksen suunta (rad). Ne asetetaan, kun
+ * alus nousee radalle tai jarruttaa sille, jotta alus jatkaa siitä kohdasta, johon se saapui.
  */
-export function parkingState(body, time) {
-  const {mu,periKm,apoKm}=orbitOf(body), a=(periKm+apoKm)/2;
-  const vp=Math.sqrt(mu*(2/periKm-1/a));
-  const rel=propagate([periKm,0,0],[0,vp,0],(time-Date.UTC(2000,0,1,12))/1000,mu), p=bodyState(body,time);
+export function parkingState(body, time, orbit = null) {
+  const {mu,periKm,apoKm}=orbitOf(body), a=(periKm+apoKm)/2, {epoch=J2000, arg=0}=orbit ?? {};
+  const vp=Math.sqrt(mu*(2/periKm-1/a)), c=Math.cos(arg), s=Math.sin(arg);
+  const rel=propagate([periKm*c,periKm*s,0],[-vp*s,vp*c,0],(time-epoch)/1000,mu), p=bodyState(body,time);
   return {r:add(p.r,rel.r), v:add(p.v,rel.v), rel};
+}
+/** Pysäköintiradan kiertoaika (s). */
+export function orbitPeriod(body) {
+  const {mu,periKm,apoKm}=orbitOf(body);
+  return 2*Math.PI*Math.sqrt(((periKm+apoKm)/2)**3/mu);
+}
+/** Pysäköintirata, jonka perikeskus on aluksen paikassa r (Auringon suhteen, km) hetkellä time. */
+export function orbitAt(body, r, time) {
+  const rel=sub(r,bodyState(body,time).r);
+  return {epoch:time, arg:Math.atan2(rel[1],rel[0])};
+}
+
+/**
+ * Lähtöpolton hetki (ms): ensimmäinen hetki ajan after jälkeen, jolloin alus on pysäköintiradalla kohdassa, josta
+ * poltto vie sen oikeaan suuntaan. Planeetasta poistutaan hyperbelillä, jonka perikeskus on polttokohdassa, ja
+ * hyperbelin asymptootti kääntyy perikeskuksesta kulman θ∞ = acos(−1/e), e = 1 + r·v∞²/μ. Ylinopeuden vinf (km/s,
+ * Auringon keskinen vektori) suunta ψ määrää siis polttokohdan suunnan ψ − θ∞.
+ * Venyneellä radalla poltto tehdään perikeskuksessa, jonka suuntaa ei voi valita: silloin odotetaan seuraavaa
+ * perikeskuksen ohitusta, ja suunnan ero jätetään huomiotta.
+ */
+export function injectionTime(body, vinf, after, orbit = null) {
+  const {mu,periKm,apoKm}=orbitOf(body), {epoch=J2000, arg=0}=orbit ?? {}, period=orbitPeriod(body)*1000;
+  if(apoKm-periKm>1) return epoch+Math.ceil((after-epoch)/period)*period;
+  const speed=norm(vinf), e=1+periKm*speed*speed/mu;
+  const want=Math.atan2(vinf[1],vinf[0])-Math.acos(-1/e), now=arg+2*Math.PI*(after-epoch)/period;
+  const turn=((want-now)%(2*Math.PI)+2*Math.PI)%(2*Math.PI);
+  return after+turn/(2*Math.PI)*period;
+}
+
+// --- Nousu Maan pinnalta kiertoradalle ---
+// Kantoraketti nostaa aluksen 200 km:n radalle noin 8,5 minuutissa. Nousua ei integroida voimista, vaan korkeus ja
+// vaakanopeus seuraavat sileitä käyriä, jotka alkavat levosta ja päättyvät täsmälleen ympyräradan tilaan.
+// Laukaisupaikka on ekliptikan tasossa Maan pinnalla ja kiertää Maan mukana (ei oikea maantieteellinen paikka).
+/** Nousun kesto laukaisusta kiertoradalle (s) ja tapahtumien hetket: suurin aerodynaaminen kuorma, vaiheen 1 sammutus ja vaiheen 2 sytytys. */
+export const ASCENT_S = 510;
+export const ASCENT_EVENTS = {maxQ:70, meco:150, stage2:158};
+// Vaakanopeus kasvaa nousun osuuden potenssina TURN_POWER, jolloin kuljettu kulma kasvaa potenssina TURN_POWER + 1.
+const EARTH_SPIN = 2*Math.PI/86164.1, PAD_ALT_KM = 0.06, TURN_POWER = 1.5;
+const padAngle = time => EARTH_SPIN*(time-J2000)/1000;
+const ascentTurn = () => {
+  const {mu,periKm}=FLIGHT_BODIES.Maa;
+  return Math.sqrt(mu/periKm)*ASCENT_S/((TURN_POWER+1)*periKm);
+};
+/**
+ * Aluksen tila laukaisualustalla ja nousussa. liftoff on laukaisuhetki (ms) tai null, kun lähtölaskentaa ei ole aloitettu.
+ * Palauttaa paikan ja nopeuden (Auringon suhteen sekä rel Maan suhteen), korkeuden alt (km), nopeuden maan suhteen
+ * speed (km/s), kiihtyvyyden g (g), vaiheen nimen phase, tärinän shake ja työntövoiman thrust (0–1) sekä aluksen
+ * nokan ja katon suunnat nose ja up.
+ */
+export function launchState(liftoff, time) {
+  const E=FLIGHT_BODIES.Maa, tau=liftoff==null ? -Infinity : (time-liftoff)/1000, s=Math.max(0,Math.min(1,tau/ASCENT_S));
+  const phi=(tau>0 ? padAngle(liftoff) : padAngle(time))+ascentTurn()*s**(TURN_POWER+1);
+  const r0=E.radiusKm+PAD_ALT_KM, r=r0+(E.periKm-r0)*(3*s*s-2*s**3);
+  const radial=[Math.cos(phi),Math.sin(phi),0], tangent=[-Math.sin(phi),Math.cos(phi),0];
+  const vr=(E.periKm-r0)*6*s*(1-s)/ASCENT_S, vt=r*ascentTurn()*(TURN_POWER+1)*s**TURN_POWER/ASCENT_S;
+  const rel={r:scale(radial,r), v:add(scale(radial,vr),scale(tangent,vt))}, p=planetState('Maa',time);
+  // Painovoimakäännös: nokka kallistuu pystystä lähes vaakaan nousun kolmen ensimmäisen neljänneksen aikana.
+  const pitch=Math.PI/2*Math.min(1,s/0.75)**0.7, cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const {maxQ,meco,stage2}=ASCENT_EVENTS;
+  let phase='Laukaisualusta', g=1, shake=0, thrust=0;
+  if(tau>=ASCENT_S) {phase='Kiertoradalla'; g=0;}
+  else if(tau>=stage2) {const k=(tau-stage2)/(ASCENT_S-stage2); phase='Vaihe 2'; g=0.7+2.6*k*k; thrust=0.6; shake=0.16-0.08*k+(tau-stage2<0.6 ? 0.8 : 0);}
+  else if(tau>=meco) {phase='Vaiheen erotus'; g=0; shake=tau-meco<0.5 ? 0.9 : 0.02;}
+  else if(tau>=0) {
+    const k=tau/meco;
+    phase=Math.abs(tau-maxQ)<12 ? 'Max Q' : tau<8 ? 'Laukaisu' : 'Vaihe 1'; g=1.3+2.4*k**1.5; thrust=1;
+    // Tärinä: kova laukaisussa, uusi huippu suurimman aerodynaamisen kuorman kohdalla, sitten ilma ohenee.
+    shake=Math.max(tau<8 ? 1 : 0, 0.5-0.2*k+0.45*Math.exp(-(((tau-maxQ)/14)**2)));
+  } else if(tau>=-3) {phase='Sytytys'; shake=0.35+0.25*(tau+3)/3; thrust=0.7;}
+  else if(liftoff!=null) phase='Lähtölaskenta';
+  return {r:add(p.r,rel.r), v:add(p.v,rel.v), rel, tau, alt:r-E.radiusKm, speed:Math.hypot(vr,vt), g, phase, shake, thrust,
+    nose:add(scale(radial,cp),scale(tangent,sp)), up:add(scale(radial,sp),scale(tangent,-cp))};
+}
+/** Pysäköintirata, jolle hetkellä liftoff alkanut nousu päättyy. */
+export function launchOrbit(liftoff) {
+  return {epoch:liftoff+ASCENT_S*1000, arg:padAngle(liftoff)+ascentTurn()};
 }
 
 /** Siirtoradan pituus (km) ja huippunopeus Auringon suhteen (km/s) näytteistä. */

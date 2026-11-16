@@ -6,7 +6,7 @@
 // tai taustalla, aika kulkee oikeaa vauhtia (1×), joten raketti lentää myös sovelluksen ollessa kiinni.
 // Kello pysähtyy laukaisuhetkeen ja saapumiseen, jotta ne eivät mene ohi.
 import { el, num, saved, button } from './core.js';
-import { FLIGHT_BODIES, FUEL_KMS, MOONS, SHIPS, applyBurn, assistTransfer, autoCorrect, bodyState, canRefuel, departureState, flightStats, fmtDuration, isMoon, isPlanet, localTransfer, moonsOf, nearestPlanet, norm, orbitOf, parkingState, planetState, shipState, shipView, soiEntry, soiExit, transfer, windowSearch } from './flight.js';
+import { ASCENT_S, FLIGHT_BODIES, FUEL_KMS, MOONS, SHIPS, applyBurn, assistTransfer, autoCorrect, bodyState, canRefuel, departureState, flightStats, fmtDuration, injectionTime, isMoon, isPlanet, launchOrbit, launchState, localTransfer, moonsOf, nearestPlanet, norm, orbitAt, orbitOf, orbitPeriod, parkingState, planetState, shipState, shipView, soiEntry, soiExit, transfer, windowSearch } from './flight.js';
 import { PLANET_INFO } from './planetinfo.js';
 import { AU_KM, LIGHT_AU_PER_MIN, solarSystem } from './planets.js';
 import { drawScene } from './solarsystem.js';
@@ -17,7 +17,10 @@ const DAY = 86400000;
 export const WARPS = [[1,'1×'],[10,'10×'],[100,'100×'],[3600,'1 h/s'],[86400,'1 vrk/s'],[7*86400,'1 vk/s'],[30*86400,'1 kk/s'],[365.25*86400,'1 v/s']];
 /** Kiihdytys pienenee, kun seuraavaan tapahtumaan on alle näin monta oikeaa millisekuntia. */
 const WARP_LEAD = 2500;
-const COUNTDOWN_S = 5;
+/** Lähtölaskennan pituus laukaisualustalla (s) ja aika lähtöpolton virityksestä aikaisimpaan polttoon (ms). */
+const PAD_COUNT_S = 10, ARM_LEAD = 10000;
+/** Polton tärinän kesto ohjaamossa (ms oikeaa aikaa). */
+const BURN_SHAKE_MS = 7000;
 // [genetiivi, illatiivi, partitiivi]
 const NAMES = {
   Merkurius:['Merkuriuksen','Merkuriukseen','Merkuriusta'], Venus:['Venuksen','Venukseen','Venusta'], Maa:['Maan','Maahan','Maata'],
@@ -36,15 +39,17 @@ const SURVEY_MS = DAY;
 
 // location: planeetta, jonka kiertoradalla alus on, tai null, kun alus on ohilennon jälkeen Auringon kiertoradalla
 // (drift = {r, v, t}). Maa on kotiplaneetta, joten se on tutkittu alusta asti.
-// ship: aluksen tyyppi (flight.js SHIPS); aluksen voi vaihtaa Maan kiertoradalla.
-const fresh = () => ({v:1, location:'Maa', drift:null, ship:'kemiallinen', fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0,
+// pad: alus on laukaisualustalla Maan pinnalla (uusi peli alkaa sieltä); ascent = {liftoff}, kun lähtölaskenta tai nousu on käynnissä.
+// orbit: pysäköintiradan vaihe ja suunta (flight.js parkingState), asetetaan radalle noustessa ja jarrutettaessa.
+// ship: aluksen tyyppi (flight.js SHIPS); aluksen voi vaihtaa Maassa.
+const fresh = () => ({v:1, location:'Maa', pad:true, ascent:null, orbit:null, drift:null, ship:'kemiallinen', fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0,
   plan:null, flight:null, survey:null, explored:['Maa'], flights:[], log:[]});
+const parked = (name, t) => parkingState(name,t,game.orbit);
 const fuelMax = () => SHIPS[game.ship].fuel;
 const isIon = () => !!SHIPS[game.ship].accel;
 let game=null, options=null, target=null, searchId=0, progress=0, frame=null, lastSave=0;
-// Lähtölaskennan päättymishetki (oikeaa aikaa), kartan rajaus, kiihdytyksen pienentämisestä kertova viesti
-// ja tieto siitä, onko näkymä piirretty saapumisen jälkeen.
-let countdown=null, mapRadius=null, mapFollow=false, notice='', shownArrived=false, logOpen=false;
+// Kartan rajaus, kiihdytyksen pienentämisestä kertova viesti ja tieto siitä, onko näkymä piirretty saapumisen jälkeen.
+let mapRadius=null, mapFollow=false, notice='', shownArrived=false, logOpen=false;
 // Kurssikorjauspaneeli: auki/kiinni, polton suunta ja suuruus (km/s) sekä esikatseltu rata.
 let burnOpen=false, burnDir='prograde', burnDv=0.05, burnPreview=null;
 const BURN_DIRS = [['prograde','Eteen'],['retrograde','Taakse'],['inward','Sisään'],['outward','Ulos']];
@@ -52,13 +57,13 @@ const BURN_SIZES = [[0.01,'10 m/s'],[0.05,'50 m/s'],[0.1,'100 m/s'],[0.5,'500 m/
 // 3D-ohjaamo (cockpit.js) ladataan vasta, kun se näytetään ensimmäisen kerran. Sen kangas säilyy elementissä
 // cockpitHost, jota siirretään näkymästä toiseen, joten WebGL-kontekstia ei luoda uudelleen.
 const VIEW_KEY = 'avaruuslento.view', PANEL_KEY = 'avaruuslento.panel';
-let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, launchedAt=-Infinity;
+let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, burnAt=-Infinity;
 
 // --- Kello ---
 
 function rawTime() { return game.simTime+(Date.now()-game.realTime)*WARPS[game.warp][0]; }
 // Ionialuksen spiraalinousu alkaa ennen varsinaista lähtöä; kello pysähtyy sen alkuun, kunnes pelaaja aloittaa sen.
-const holdAt = () => game.plan ? (game.plan.spiralOut && !game.plan.spiralStarted ? game.plan.depart-game.plan.spiralOut : game.plan.depart)
+const holdAt = () => game.ascent ? game.ascent.liftoff+ASCENT_S*1000 : game.plan ? (game.plan.spiralOut && !game.plan.spiralStarted ? game.plan.depart-game.plan.spiralOut : game.plan.depart)
   : game.flight ? game.flight.arrive : Infinity;
 function anchor(t, warp) { game.simTime=t; game.realTime=Date.now(); game.warp=warp; save(); }
 
@@ -71,27 +76,30 @@ function simNow() {
   }
   return t;
 }
-function setWarp(i) { notice=''; anchor(simNow(),i); render(); }
+// Lähtölaskennassa ja nousussa aikaa voi kiihdyttää enintään kymmenkertaiseksi.
+function setWarp(i) { notice=''; anchor(simNow(),game.pad ? Math.min(i,1) : i); render(); }
 
 // Ennen vaikutuspiirin rajaa ja saapumista kiihdytys pienenee portaittain, jotta tapahtuma ei vilahda ohi.
 function limitWarp(t) {
-  if(!game.flight || !game.warp) return;
-  const f=game.flight, next=[f.flyby && !f.flyby.done ? f.flyby.t : Infinity, f.soi, f.arrive].filter(s=>s>t).sort((a,b)=>a-b)[0];
+  if(!game.warp || !(game.flight || game.plan?.armed)) return;
+  const f=game.flight ?? {};
+  const next=(game.flight ? [f.flyby && !f.flyby.done ? f.flyby.t : Infinity, f.soi, f.arrive] : [game.plan.depart]).filter(s=>s>t).sort((a,b)=>a-b)[0];
   if(next==null) return;
   let i=game.warp;
   while(i>0 && WARPS[i][0]*WARP_LEAD>next-t) i--;
   if(i===game.warp) return;
-  notice=`Kiihdytys pienennettiin (${WARPS[i][1]}): ${next===f.flyby?.t ? `ohilento ${NAMES[f.flyby.body][0]} ohi` : next===f.soi && next!==f.arrive ? `${NAMES[f.to][0]} vaikutuspiiri` : 'saapuminen'} lähestyy.`;
+  notice=`Kiihdytys pienennettiin (${WARPS[i][1]}): ${!game.flight ? 'lähtöpoltto' : next===f.flyby?.t ? `ohilento ${NAMES[f.flyby.body][0]} ohi` : next===f.soi && next!==f.arrive ? `${NAMES[f.to][0]} vaikutuspiiri` : 'saapuminen'} lähestyy.`;
   anchor(t,i); render();
 }
 
 function save() { lastSave=Date.now(); saved.set(KEY,game); }
 // Taustalle mentäessä kiihdytys palaa 1×:ään: suljettuna aika kulkee oikeaa vauhtia.
-function park() { if(!game) return; countdown=null; if(game.warp) anchor(simNow(),0); else save(); }
+function park() { if(!game) return; if(game.warp) anchor(simNow(),0); else save(); }
 
 function load() {
   const s=saved.get(KEY,null);
-  game=s?.v===1 ? {...fresh(), ...s} : fresh();
+  // Ennen laukaisualustaa tallennetussa pelissä alus on jo kiertoradalla tai matkalla.
+  game=s?.v===1 ? {...fresh(), pad:false, ...s} : fresh();
   // Jos tallennus jäi kiihdytykselle (selain suljettiin kesken), suljettu aika lasketaan silti 1×:nä.
   game.warp=0;
   simNow();
@@ -141,9 +149,9 @@ function stat(label, id, subId) {
   return box;
 }
 function actions(...buttons) { const box=make('div','voyage-actions'); box.append(...buttons); return box; }
-function warpButtons() {
+function warpButtons(count = WARPS.length) {
   const warps=make('div','seg voyage-warps'); warps.setAttribute('role','group'); warps.setAttribute('aria-label','Aikakiihdytys');
-  WARPS.forEach(([,label],i)=>{const b=button('',label,()=>setWarp(i)); b.setAttribute('aria-pressed',String(i===game.warp)); warps.append(b);});
+  WARPS.slice(0,count).forEach(([,label],i)=>{const b=button('',label,()=>setWarp(i)); b.setAttribute('aria-pressed',String(i===game.warp)); warps.append(b);});
   return warps;
 }
 
@@ -151,7 +159,8 @@ function status() {
   const box=make('div','voyage-status');
   const where=make('div','stat');
   where.append(make('span',null,'Sijainti'));
-  if(game.flight) where.append(make('b',null,`Matkalla ${NAMES[game.flight.to][1]}`), make('small','muted',`lähtö ${fromText(game.flight.from)}`));
+  if(game.pad) where.append(make('b',null,game.ascent && simNow()>=game.ascent.liftoff ? 'Nousussa kiertoradalle' : 'Laukaisualustalla'), make('small','muted',game.ascent && simNow()>=game.ascent.liftoff ? 'kantoraketin kyydissä' : 'Maan pinnalla'));
+  else if(game.flight) where.append(make('b',null,`Matkalla ${NAMES[game.flight.to][1]}`), make('small','muted',`lähtö ${fromText(game.flight.from)}`));
   else if(game.location) where.append(make('b',null,`${NAMES[game.location][0]} kiertoradalla`), make('small','muted',orbitText(game.location)));
   else where.append(make('b',null,'Auringon kiertoradalla'), make('small','muted','ohilennon jälkeen'));
   const fuel=make('div','stat');
@@ -335,18 +344,40 @@ function waiting(body) {
   const count=make('div','voyage-count'); count.id='voyage-count'; count.dataset.ready=ready ? '1' : '';
   body.append(count, viewSwitch(), showCockpit() ? cockpitStage() : mapStage());
   const cancel=button('sky-btn','Peru lento',()=>{game.plan=null; options=null; target=null; save(); render();});
-  if(!ready) {
-    body.append(make('p','muted','Odota laukaisuikkunaa tai kiihdytä aikaa. Kello pysähtyy laukaisuhetkeen, joten ikkuna ei mene ohi.'), warpButtons(),
-      actions(button('sky-btn',ion ? 'Siirry spiraalin alkuun' : 'Siirry laukaisuhetkeen',()=>{anchor(holdAt(),0); render();}), cancel));
+  if(p.armed) {
+    body.append(make('p','muted',notice || (isPlanet(p.from) && !p.local
+      ? `Lähtöpoltto on päällä. Alus kiertää ${NAMES[p.from][2]} nokka menosuuntaan, ja moottori syttyy itsestään, kun alus on radalla kohdassa, josta poltto linkoaa sen kohti ${NAMES[p.to][2]}.`
+      : 'Lähtöpoltto on päällä. Moottori syttyy itsestään, kun lähtölaskenta päättyy.')), warpButtons(),
+      actions(button('sky-btn','Lähtöpoltto pois',disarm), cancel));
+  } else if(!ready) {
+    body.append(make('p','muted','Odota laukaisuikkunaa tai kiihdytä aikaa. Kello pysähtyy ikkunan avautuessa, joten se ei mene ohi.'), warpButtons(),
+      actions(button('sky-btn',ion ? 'Siirry spiraalin alkuun' : 'Siirry ikkunan alkuun',()=>{anchor(holdAt(),0); render();}), cancel));
   } else if(ion) {
     body.append(make('p','muted',`Spiraalinousu kuluttaa ${dv(p.dvDep)} polttoainetta ja kestää ${fmtDays(p.spiralOut/DAY)}.`),
       actions(button('voyage-go','Aloita spiraalinousu',startSpiral), cancel));
-  } else if(countdown) {
-    body.append(actions(button('sky-btn','Keskeytä lähtölaskenta',()=>{countdown=null; render();})));
   } else {
-    body.append(make('p','muted',`Laukaisuikkuna on auki. Lähtöpoltto kuluttaa ${dv(p.dvDep)} polttoainetta.`),
-      actions(button('voyage-go','Laukaise',()=>{countdown=Date.now()+COUNTDOWN_S*1000; render();}), cancel));
+    const wait=isPlanet(p.from) && !p.local ? ` Polttokohtaan on enintään ${fmtDuration(orbitPeriod(p.from)*1000).replace(/^0 vrk /,'')}.` : '';
+    body.append(make('p','muted',notice || `Laukaisuikkuna on auki. Kytke lähtöpoltto päälle: alus jatkaa kiertorataa ja polttaa moottorin, kun se on oikeassa kohdassa.${wait} Poltto kuluttaa ${dv(p.dvDep)} polttoainetta.`),
+      actions(button('voyage-go','Lähtöpoltto päälle',arm), cancel));
   }
+}
+
+// Laukaisualusta ja nousu kiertoradalle. Lähtölaskennan ja nousun aikana näkymä vaihtuu mittareihin.
+function padView(body) {
+  const a=game.ascent;
+  if(!a) {
+    body.append(make('p',null,'Alus on laukaisualustalla Maan pinnalla. Kantoraketti nostaa sen 200 km:n kiertoradalle noin 8,5 minuutissa. Aluksen omaa polttoainetta nousu ei kuluta.'),
+      viewSwitch(), showCockpit() ? cockpitStage() : mapStage(), shipyard(),
+      actions(button('voyage-go','Aloita lähtölaskenta',()=>{game.ascent={liftoff:simNow()+PAD_COUNT_S*1000}; anchor(simNow(),0); render();})), logbook());
+    return;
+  }
+  const up=simNow()>=a.liftoff;
+  const count=make('div','voyage-count'); count.id='voyage-count'; count.dataset.up=up ? '1' : '';
+  const stats=make('div','voyage-stats');
+  stats.append(stat('Vaihe','voyage-phase'), stat('Korkeus','voyage-alt'), stat('Nopeus maan suhteen','voyage-aspeed','voyage-aspeed-sub'), stat('Kiihtyvyys','voyage-g'));
+  body.append(count, viewSwitch(), showCockpit() ? cockpitStage() : mapStage(), stats);
+  if(up) body.append(warpButtons(2), make('p','muted','Vaihe 1 sammuu ja irtoaa 2 min 30 s kohdalla, ja vaihe 2 vie aluksen kiertoradalle. Aikaa voi kiihdyttää kymmenkertaiseksi.'));
+  else body.append(actions(button('sky-btn','Keskeytä lähtölaskenta',()=>{game.ascent=null; save(); render();})));
 }
 
 // Kartta piirretään uudelleen aina, kun sen koko muuttuu (ikkunan koko, sivupaneelin liuku).
@@ -444,8 +475,8 @@ function burnPanel() {
     if(game.fuel<burnDv) return;
     game.fuel-=burnDv; game.flight={...applyBurn(game.flight,simNow(),burnDir,burnDv)};
     game.log.push({t:simNow(), text:`Kurssikorjaus: ${BURN_SIZES.find(([v])=>v===burnDv)[1]} ${BURN_DIRS.find(([v])=>v===burnDir)[1].toLowerCase()}`});
-    // Lyhyt tärinä polton merkiksi: laukaisun tärinän viimeinen sekunti.
-    burnPreview=null; notice=''; launchedAt=Date.now()-6000; save(); render();
+    // Lyhyt tärinä polton merkiksi: polton tärinän viimeinen sekunti.
+    burnPreview=null; notice=''; burnAt=Date.now()-(BURN_SHAKE_MS-1000); save(); render();
   });
   burn.disabled=game.fuel<burnDv;
   const buttons=[burn];
@@ -503,7 +534,7 @@ function render() {
   if(!game || el('voyage').hidden) return;
   const body=el('voyage-body');
   body.replaceChildren(status());
-  if(game.flight) flying(body); else if(game.plan) waiting(body); else orbiting(body);
+  if(game.pad) padView(body); else if(game.flight) flying(body); else if(game.plan) waiting(body); else orbiting(body);
   syncCockpit();
   update();
 }
@@ -516,7 +547,7 @@ function readouts(t) {
   const speed=f?.local ? norm(ship.rel.v) : norm(ship.v);
   const near=f?.local ? {name:f.parent, speed:norm(ship.rel.v)} : f || !isPlanet(tr.from) ? nearestPlanet(ship.r,ship.v,t) : {name:tr.from, speed:0};
   return {
-    met: f ? `T+ ${fmtDuration(t-f.depart)}` : countdown ? `T− ${Math.max(1,Math.ceil((countdown-Date.now())/1000))} s` : `T− ${fmtDuration(tr.depart-t)}`,
+    met: f ? `T+ ${fmtDuration(t-f.depart)}` : `T− ${fmtDuration(tr.depart-t)}`,
     date: fmtDate(t), speed, near,
     dist: fmtKm(gap(ship.r,bodyState(tr.to,t).r)),
     eta: t<tr.arrive ? `perillä ${fmtDate(tr.arrive)}, T− ${fmtDuration(tr.arrive-t)}` : 'perillä',
@@ -529,10 +560,23 @@ function readouts(t) {
 // Lennolla nokka osoittaa lähtöplaneettaan, kunnes sen vaikutuspiiri on takana, ja sitten kohteeseen.
 // Kiertoradalla ja ennen laukaisua alus kiertää planeettaa, joka täyttää ikkunan.
 function cockpitState() {
-  const t=simNow(), base={t, warp:WARPS[game.warp][0], launchAge:Date.now()-launchedAt, countdown:countdown ? countdown-Date.now() : null};
+  // Polton tärinä ja moottorin hehku vaimenevat muutamassa sekunnissa oikeaa aikaa.
+  const burn=Math.max(0,1-(Date.now()-burnAt)/BURN_SHAKE_MS);
+  const t=simNow(), base={t, warp:WARPS[game.warp][0], shake:burn*0.7, thrust:burn};
+  if(game.pad) {
+    const L=launchState(game.ascent?.liftoff ?? null,t), sunDir=L.r.map(x=>-x/norm(L.r)), upDir=L.rel.r.map(x=>x/norm(L.rel.r));
+    // Taivaan kirkkaus: päivällä sininen, hämärtyy Auringon laskiessa ja ilmakehän ohetessa korkeuden mukana.
+    const day=Math.max(0,Math.min(1,(sunDir[0]*upDir[0]+sunDir[1]*upDir[1]+sunDir[2]*upDir[2]+0.1)/0.3));
+    return {...base, ship:{r:L.r, v:L.v}, aim:'Maa', nose:L.nose, up:L.up, shake:L.shake, thrust:L.thrust, sky:day*Math.exp(-L.alt/14),
+      screens:[
+        [L.tau>=0 ? 'NOUSU' : 'LAUKAISUALUSTA',[[padClock(L.tau),36],[L.phase.toUpperCase(),28,'#ffb547'],[fmtDate(t),26,'#8b9ac0']]],
+        ['NOPEUS',[[`${num(L.speed,2)} km/s`,44],[`${num(L.speed*3600)} km/h`,28,'#8b9ac0'],[`korkeus ${L.alt<10 ? num(L.alt,1) : num(L.alt)} km`,26,'#8b9ac0']]],
+        ['KIIHTYVYYS',[[`${num(L.g,1)} g`,44],[`polttoaine ${num(game.fuel,2)} km/s`,26,'#8b9ac0']],game.fuel/fuelMax()],
+      ]};
+  }
   const tr=game.flight ?? game.plan;
   if(!tr) {
-    const name=game.location, ship=name ? parkingState(name,t) : departureState(game.drift,t);
+    const name=game.location, ship=name ? parked(name,t) : departureState(game.drift,t);
     const date=[fmtDate(t),28,'#8b9ac0'], warp=[WARPS[game.warp][1],28,'#ffb547'];
     return {...base, ship, aim:name,
       screens:[
@@ -543,18 +587,27 @@ function cockpitState() {
       ]};
   }
   const r=readouts(t);
-  const ship=game.flight ? shipView(tr,t) : isPlanet(tr.from) ? parkingState(tr.from,t) : departureState(tr.from,t);
+  const ship=game.flight ? shipView(tr,t) : isPlanet(tr.from) ? parked(tr.from,t) : departureState(tr.from,t);
+  // Kun lähtöpoltto on päällä, alus kääntyy kiertoradalla nokka menosuuntaan ja katto poispäin planeetasta.
+  const prograde=!game.flight && tr.armed && ship.rel ? {nose:ship.rel.v, up:ship.rel.r} : {};
   // Lennolla nokka osoittaa ensin lähtöplaneettaan, sitten linkousplaneettaan (vielä 3 h ohituksen jälkeen, jotta
   // planeetan näkee loittonevan) ja lopuksi kohteeseen.
   const aim=game.flight ? (isPlanet(tr.from) && t<tr.exit ? tr.from : tr.flyby && t<tr.flyby.t+3*3600000 ? tr.flyby.body : tr.to) : isPlanet(tr.from) ? tr.from : tr.to;
   return {
-    ...base, ship, aim,
+    ...base, ...prograde, ship, aim,
     screens:[
-      ['LENTOAIKA',[[r.met,36],[r.date,28,'#8b9ac0'],[WARPS[game.warp][1],28,'#ffb547']]],
+      [game.flight ? 'LENTOAIKA' : tr.armed ? 'LÄHTÖPOLTTO' : 'LAUKAISUIKKUNA',[[r.met,36],[r.date,28,'#8b9ac0'],[WARPS[game.warp][1],28,'#ffb547']]],
       ['NOPEUS',[[`${num(r.speed,2)} km/s`,44],[`${num(r.speed*3600)} km/h`,28,'#8b9ac0'],[game.flight ? `${r.near.name} ${num(r.near.speed,2)} km/s` : 'pysäköintirata',26,'#8b9ac0']]],
       [`KOHDE: ${tr.to.toUpperCase()}`,[[r.dist,34],[`polttoaine ${num(game.fuel,2)} km/s`,26,'#8b9ac0']],game.fuel/fuelMax()],
     ],
   };
+}
+
+// Lähtölaskennan ja nousun kello: T− 00.07 ennen laukaisua, T+ 02.31 sen jälkeen.
+function padClock(tau) {
+  if(tau===-Infinity) return 'valmiina';
+  const sec=tau<0 ? Math.ceil(-tau) : Math.floor(tau);
+  return `T${tau<0 ? '−' : '+'} ${String(Math.floor(sec/60)).padStart(2,'0')}.${String(sec%60).padStart(2,'0')}`;
 }
 
 // Kellon, mittarien ja kartan päivitys ilman koko näkymän uudelleenrakentamista.
@@ -563,6 +616,15 @@ function update() {
   el('voyage-date').textContent=fmtDate(t);
   el('voyage-time').textContent=`${fmtClock(t)} · ${WARPS[game.warp][1]}`;
   const set=(id,text)=>{const n=document.getElementById(id); if(n) n.textContent=text;};
+  if(game.pad && game.ascent) {
+    const L=launchState(game.ascent.liftoff,t), count=document.getElementById('voyage-count');
+    // Laukaisuhetkellä näkymä rakennetaan uudelleen: keskeytyspainike vaihtuu aikakiihdytykseen.
+    if(count && !count.dataset.up && L.tau>=0) {render(); return;}
+    set('voyage-count',padClock(L.tau)); set('voyage-phase',L.phase);
+    set('voyage-alt',`${L.alt<10 ? num(L.alt,1) : num(L.alt)} km`);
+    set('voyage-aspeed',`${num(L.speed,2)} km/s`); set('voyage-aspeed-sub',`${num(L.speed*3600)} km/h`);
+    set('voyage-g',`${num(L.g,1)} g`);
+  }
   if(game.plan) {
     const p=game.plan, left=holdAt()-t, count=document.getElementById('voyage-count');
     if(p.spiralStarted) {
@@ -570,7 +632,7 @@ function update() {
       if(bar) bar.style.width=`${f*100}%`;
       set('voyage-count',`Spiraali ${num(f*100)} % · T− ${fmtDuration(p.depart-t)}`);
     } else {
-      set('voyage-count',countdown ? `${Math.max(1,Math.ceil((countdown-Date.now())/1000))}` : left>0 ? `T− ${fmtDuration(left)}` : 'T− 0');
+      set('voyage-count',left>0 ? `${p.armed ? 'Poltto ' : ''}T− ${fmtDuration(left).replace(/^0 vrk /,'')}` : 'T− 0');
       if(count && left<=0 && !count.dataset.ready) {count.dataset.ready='1'; render();}
     }
   }
@@ -724,6 +786,33 @@ function choose(o) {
   save(); render();
 }
 
+// Suunnitelma uudella lähtöhetkellä: saapuminen (ja mahdollinen ohilento) pysyvät samoina, lähtö siirtyy.
+function replan(p, depart) {
+  if(p.local) return localTransfer(p.from,p.to,depart);
+  if(p.flyby) return assistTransfer(p.from,p.flyby.body,p.to,depart,(p.flyby.t-depart)/DAY,(p.arrive-p.flyby.t)/DAY,p.ship);
+  return transfer(p.from,p.to,depart,(p.arrive-depart)/DAY,p.ship);
+}
+// Lähtöpoltto päälle: lasketaan hetki, jolloin alus on pysäköintiradalla polttokohdassa, ja siirtorata ratkaistaan
+// uudelleen sille hetkelle. Polttokohta riippuu lähtösuunnasta ja lähtösuunta hetkestä, joten lasku toistetaan kerran.
+// Auringon kiertoradalta ja kuiden väleillä poltto tehdään heti lyhyen lähtölaskennan jälkeen.
+function arm() {
+  const p=game.plan, now=simNow(), orbital=isPlanet(p.from) && !p.local;
+  let depart=now+ARM_LEAD, tr=orbital ? p : replan(p,depart);
+  if(orbital) for(let i=0;i<2 && tr;i++) {
+    depart=injectionTime(p.from,tr.v1.map((v,k)=>v-bodyState(p.from,tr.depart).v[k]),now+ARM_LEAD,game.orbit);
+    tr=replan(p,depart);
+  }
+  // Lähdön siirtyminen muuttaa Δv:tä hieman; pieni ylitys (alle 0,05 km/s) pyöristetään polttoaineen mukaan.
+  if(!tr || tr.dvTotal>game.fuel+0.05) {notice='Polttoaine ei riitä lähtöön tästä kohdasta rataa. Peru lento ja hae reitit uudelleen.'; render(); return;}
+  const over=Math.max(0,tr.dvTotal-game.fuel), {kind,fuelOk,r2,v2,...plan}=tr;
+  game.plan={...plan, dvDep:tr.dvDep-over, dvTotal:tr.dvTotal-over, armed:true, window:p};
+  notice=''; anchor(now,0); render();
+}
+function disarm() {
+  game.plan=game.plan.window; notice='';
+  save(); render();
+}
+
 function startSpiral() {
   const p=game.plan;
   p.spiralStarted=true; game.fuel=Math.max(0,game.fuel-p.dvDep);
@@ -732,14 +821,14 @@ function startSpiral() {
 }
 
 function launch() {
-  const p=game.plan;
-  countdown=null; notice=''; mapRadius=null; mapFollow=false; burnOpen=false; burnPreview=null;
+  const {armed,window:planned,...p}=game.plan;
+  notice=''; mapRadius=null; mapFollow=false; burnOpen=false; burnPreview=null;
   // Ionialuksen polttoaine kului jo spiraalinousussa, eikä hiljainen ionimoottori täräytä ohjaamoa.
-  if(!p.spiralStarted) {game.fuel=Math.max(0,game.fuel-p.dvDep); launchedAt=Date.now();}
+  if(!p.spiralStarted) {game.fuel=Math.max(0,game.fuel-p.dvDep); burnAt=Date.now();}
   game.flight=p.local ? {...p, soi:p.arrive, exit:p.depart} : {...p, soi:soiEntry(p), exit:soiExit(p)};
-  game.plan=null; game.drift=null; game.location=null;
+  game.plan=null; game.drift=null; game.location=null; game.orbit=null;
   game.log.push({t:p.depart, text:p.spiralStarted ? `Spiraalinousu valmis, siirtorata kohti ${NAMES[p.to][2]} alkoi`
-    : `Laukaisu ${fromText(p.from)} kohti ${NAMES[p.to][2]}${p.flyby ? ` ${NAMES[p.flyby.body][0]} kautta` : ''} (Δv ${dv(p.dvDep)})`});
+    : `Lähtöpoltto ${fromText(p.from)} kohti ${NAMES[p.to][2]}${p.flyby ? ` ${NAMES[p.flyby.body][0]} kautta` : ''} (Δv ${dv(p.dvDep)})`});
   anchor(p.depart,0); render();
 }
 
@@ -750,6 +839,9 @@ function capture() {
   if(captured) {
     game.fuel=Math.max(0,game.fuel-f.dvArr);
     game.location=f.to; game.drift=null;
+    // Alus jää radalle siihen kohtaan, johon se saapui: jarrutuspoltto tehdään perikeskuksessa.
+    game.orbit=orbitAt(f.to,shipView(f,f.arrive).r,f.arrive);
+    if(!f.spiralIn) burnAt=Date.now();
     const took=f.arrive-f.depart<2*DAY ? fmtDuration(f.arrive-f.depart).replace(/^0 vrk /,'') : fmtDays((f.arrive-f.depart)/DAY);
     game.log.push({t:f.arrive, text:`Saapuminen ${NAMES[f.to][0]} kiertoradalle ${took} lennon jälkeen (Δv ${dv(f.dvArr)})`});
     // Ionialus laskeutuu kiertoradalle spiraalina, joka kestää kuten kartoitus.
@@ -784,18 +876,27 @@ function finishSurvey() {
   save(); render();
 }
 
+// Nousu päättyy: alus on 200 km:n kiertoradalla siinä kohdassa, johon nousu sen vei.
+function reachOrbit() {
+  const {liftoff}=game.ascent, end=liftoff+ASCENT_S*1000;
+  game.orbit=launchOrbit(liftoff); game.pad=false; game.ascent=null;
+  game.log.push({t:end, text:'Laukaisu Maan pinnalta: kiertoradalla 200 km korkeudella 8 min 30 s nousun jälkeen'});
+  notice=''; anchor(end,0); render();
+}
+
 // Linkous: ohilennon poltto (jos tarvitaan) tehdään perikeskuksessa.
 function flybyDone() {
   const f=game.flight;
   f.flyby={...f.flyby, done:true};
+  if(f.flyby.dv>0.005) burnAt=Date.now();
   game.fuel=Math.max(0,game.fuel-f.flyby.dv);
   game.log.push({t:f.flyby.t, text:`Linkous ${NAMES[f.flyby.body][0]} ohi ${fmtKm(f.flyby.rpKm-FLIGHT_BODIES[f.flyby.body].radiusKm)} korkeudelta${f.flyby.dv>0.005 ? ` (Δv ${dv(f.flyby.dv)})` : ''}`});
   notice=''; save(); render();
 }
 
 function restart() {
-  if(!confirm('Aloitetaanko alusta? Uusi lento lähtee Maan kiertoradalta täydellä polttoaineella.')) return;
-  game=fresh(); options=null; target=null; countdown=null; notice='';
+  if(!confirm('Aloitetaanko alusta? Uusi lento lähtee laukaisualustalta Maan pinnalta täydellä polttoaineella.')) return;
+  game=fresh(); options=null; target=null; notice='';
   save(); render();
 }
 
@@ -804,8 +905,9 @@ function restart() {
 function tick() {
   frame=null;
   if(el('voyage').hidden || document.hidden) return;
-  if(countdown && Date.now()>=countdown) launch();
   const t=simNow();
+  if(game.ascent && t>=game.ascent.liftoff+ASCENT_S*1000) reachOrbit();
+  if(game.plan?.armed && t>=game.plan.depart) launch();
   limitWarp(t);
   const f=game.flight;
   if(f?.flyby && !f.flyby.done && t>=f.flyby.t) flybyDone();
@@ -814,7 +916,7 @@ function tick() {
   else if(game.flight && t>=game.flight.arrive && !shownArrived) render();
   else update();
   if(Date.now()-lastSave>5000) save();
-  frame=setTimeout(()=>requestAnimationFrame(tick),game.flight ? 50 : 100);
+  frame=setTimeout(()=>requestAnimationFrame(tick),game.flight || game.ascent ? 50 : 100);
 }
 
 function open() {

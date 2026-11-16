@@ -535,3 +535,93 @@ describe("avaruuslennon linkoukset, kuut ja alukset", async () => {
     expect(F.canRefuel("kemiallinen", "Mars")).toBe(true);
   });
 });
+
+describe("laukaisu, lähtöpoltto ja saapumisrata (flight.js)", async () => {
+  const F = await import("../../frontend/js/flight.js");
+  const liftoff = Date.parse("2027-01-01T10:00:00Z"), seco = liftoff + F.ASCENT_S * 1000;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const angleGap = (a, b) => Math.abs(((a - b + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);
+
+  it("alus seisoo alustalla Maan pinnalla ja nokka osoittaa ylös", () => {
+    for (const s of [F.launchState(null, liftoff), F.launchState(liftoff, liftoff - 5000)]) {
+      expect(s.alt).toBeLessThan(0.1);
+      expect(s.speed).toBe(0);
+      // Nokka on säteen suuntainen.
+      expect(F.dot(s.nose, s.rel.r) / F.norm(s.rel.r)).toBeCloseTo(1, 6);
+    }
+    expect(F.launchState(null, liftoff).phase).toBe("Laukaisualusta");
+    expect(F.launchState(liftoff, liftoff - 5000).phase).toBe("Lähtölaskenta");
+    expect(F.launchState(liftoff, liftoff - 1000).shake).toBeGreaterThan(0);
+  });
+
+  it("nousu päättyy täsmälleen kiertoradan tilaan", () => {
+    const end = F.launchState(liftoff, seco), orbit = F.parkingState("Maa", seco, F.launchOrbit(liftoff));
+    expect(end.alt).toBeCloseTo(200, 6);
+    expect(end.speed).toBeCloseTo(7.79, 1);
+    expect(F.norm(sub(end.r, orbit.r))).toBeLessThan(1e-3);
+    expect(F.norm(sub(end.v, orbit.v))).toBeLessThan(1e-6);
+    // Lopussa nokka on menosuuntaan ja katto poispäin Maasta.
+    expect(F.dot(end.nose, end.rel.v) / F.norm(end.rel.v)).toBeCloseTo(1, 6);
+    expect(F.dot(end.up, end.rel.r) / F.norm(end.rel.r)).toBeCloseTo(1, 6);
+  });
+
+  it("korkeus ja nopeus kasvavat koko nousun ajan ja vaiheet vaihtuvat oikeilla hetkillä", () => {
+    let prev = F.launchState(liftoff, liftoff);
+    for (let tau = 5; tau <= F.ASCENT_S; tau += 5) {
+      const s = F.launchState(liftoff, liftoff + tau * 1000);
+      expect(s.alt).toBeGreaterThan(prev.alt);
+      expect(s.speed).toBeGreaterThan(prev.speed);
+      prev = s;
+    }
+    const at = (tau) => F.launchState(liftoff, liftoff + tau * 1000);
+    expect(at(2).phase).toBe("Laukaisu");
+    expect(at(F.ASCENT_EVENTS.maxQ).phase).toBe("Max Q");
+    expect(at(F.ASCENT_EVENTS.meco + 2).phase).toBe("Vaiheen erotus");
+    expect(at(F.ASCENT_EVENTS.meco + 2).g).toBe(0);
+    expect(at(300).phase).toBe("Vaihe 2");
+    // Tärinä on kovimmillaan laukaisussa ja suurimman aerodynaamisen kuorman kohdalla, vaiheessa 2 vähäistä.
+    expect(at(2).shake).toBe(1);
+    expect(at(F.ASCENT_EVENTS.maxQ).shake).toBeGreaterThan(at(40).shake);
+    expect(at(300).shake).toBeLessThan(0.2);
+  });
+
+  it("lähtöpoltto ajoittuu kohtaan, josta hyperbelin asymptootti osoittaa lähtösuuntaan", () => {
+    const orbit = F.launchOrbit(liftoff), now = seco + 60000;
+    const tr = F.transfer("Maa", "Mars", now, 259);
+    const vinf = sub(tr.v1, F.planetState("Maa", now).v);
+    const t = F.injectionTime("Maa", vinf, now, orbit);
+    expect(t).toBeGreaterThanOrEqual(now);
+    expect(t - now).toBeLessThanOrEqual(F.orbitPeriod("Maa") * 1000 + 1);
+    const { mu, periKm } = F.FLIGHT_BODIES.Maa, e = 1 + periKm * F.dot(vinf, vinf) / mu;
+    const rel = F.parkingState("Maa", t, orbit).rel.r;
+    expect(angleGap(Math.atan2(rel[1], rel[0]), Math.atan2(vinf[1], vinf[0]) - Math.acos(-1 / e))).toBeLessThan(1e-6);
+  });
+
+  it("venyneellä radalla lähtöpoltto tehdään seuraavassa perikeskuksessa", () => {
+    const orbit = { epoch: liftoff, arg: 1 }, period = F.orbitPeriod("Jupiter") * 1000;
+    const t = F.injectionTime("Jupiter", [3, 4, 0], liftoff + 0.3 * period, orbit);
+    expect(t).toBeCloseTo(liftoff + period, -1);
+    const rel = F.parkingState("Jupiter", t, orbit).rel.r;
+    expect(F.norm(rel)).toBeCloseTo(F.FLIGHT_BODIES.Jupiter.periKm, 0);
+  });
+
+  it("jarrutuksen jälkeen alus jatkaa radalla saapumiskohdastaan", () => {
+    const t = liftoff, p = F.planetState("Mars", t), dir = [Math.cos(2.2), Math.sin(2.2), 0];
+    const r = p.r.map((x, i) => x + dir[i] * F.FLIGHT_BODIES.Mars.periKm);
+    const s = F.parkingState("Mars", t, F.orbitAt("Mars", r, t));
+    expect(F.norm(sub(s.r, r))).toBeLessThan(1e-3);
+  });
+
+  it("saapumisradat ovat matalia ja kemiallinen raketti pääsee niille", () => {
+    const alt = (name) => F.FLIGHT_BODIES[name].periKm - F.FLIGHT_BODIES[name].radiusKm;
+    for (const name of ["Merkurius", "Venus", "Mars"]) {
+      expect(alt(name)).toBe(500);
+      expect(F.FLIGHT_BODIES[name].apoKm).toBe(F.FLIGHT_BODIES[name].periKm);
+    }
+    expect(alt("Maa")).toBe(200);
+    for (const name of ["Jupiter", "Saturnus", "Uranus", "Neptunus"]) expect(alt(name)).toBeLessThanOrEqual(5000);
+    // Tyypillinen saapuminen Marsiin (v∞ 2,6 km/s) ja Jupiteriin (5,6 km/s) mahtuu selvästi 14 km/s:n budjettiin.
+    expect(F.burnDv("Mars", 2.6)).toBeLessThan(2.5);
+    expect(F.burnDv("Jupiter", 5.6)).toBeLessThan(2);
+  });
+});

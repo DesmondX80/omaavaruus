@@ -20,7 +20,8 @@ const STAR_DISTANCE = 1e16;
 const SPIN_HOURS = {Merkurius:1407.6, Venus:-5832.5, Maa:23.934, Mars:24.623, Jupiter:9.925, Saturnus:10.656, Uranus:-17.24, Neptunus:16.11};
 // Pyörähdysakselien pohjoisnavat (IAU, J2000): [rektaskensio°, deklinaatio°]. Kuiden akselit ovat pystyssä.
 const POLES = {Merkurius:[281.01,61.41], Venus:[272.76,67.16], Maa:[0,90], Mars:[317.68,52.89], Jupiter:[268.06,64.5], Saturnus:[40.59,83.54], Uranus:[257.31,-15.18], Neptunus:[299.36,43.46]};
-const SHAKE_MS = 7000;
+// Päivätaivaan väri Maan pinnalta katsottuna.
+const SKY = new THREE.Color(0x4f8fd0);
 
 // Osuus Auringon kiekosta, jonka sen edessä oleva kappale peittää aluksesta katsottuna: kahden ympyrän leikkausala
 // jaettuna Auringon kiekon alalla. sunR ja bodyR ovat kiekkojen kulmasäteet ja sep niiden keskipisteiden kulmaetäisyys.
@@ -144,7 +145,8 @@ function drawSystems(ctx, w, h, fuel, warp, aim) {
 /**
  * Luo ohjaamonäkymän elementtiin host. state() palauttaa joka ruudulla pelin tilan:
  * {t, ship: {r, v} (aluksen paikka km ja nopeus Auringon suhteen), aim (planeetta, johon nokka osoittaa, tai null),
- *  warp, launchAge (ms laukaisusta), countdown (ms tai null), screens (kolmen näytön otsikko ja rivit)}.
+ *  nose ja up (valinnaiset ekliptikan suuntavektorit, jotka korvaavat aim-suunnan), warp, shake (tärinä 0–1),
+ *  thrust (moottorin hehku 0–1), sky (päivätaivaan kirkkaus 0–1), screens (kolmen näytön otsikko ja rivit)}.
  * Palauttaa {start, stop, resetView} tai heittää virheen, jos WebGL ei ole käytettävissä.
  */
 export function createCockpit(host, state) {
@@ -160,7 +162,9 @@ export function createCockpit(host, state) {
   const ship=new THREE.Group(), head=new THREE.Group();
   const camera=new THREE.PerspectiveCamera(70,1,0.02,1e17);
   head.add(camera); ship.add(head); scene.add(ship);
-  scene.add(stars());
+  const starField=stars();
+  starField.traverse(o=>{if(o.material) o.material.transparent=true;});
+  scene.add(starField);
 
   // Aurinko: pallo, häikäisy ja valonlähde, joka valaisee planeetat oikealta puolelta. Himmeä hajavalo erottaa
   // planeetan yöpuolen, kun alus kiertää sitä varjon puolella.
@@ -243,6 +247,8 @@ export function createCockpit(host, state) {
   // bounce on ikkunoista sisään tulevan auringonvalon heijastuma ohjaamon pinnoista: sitä ei lasketa säteittäin, vaan
   // sen voimakkuus arvioidaan siitä, kuinka suoraan Aurinko paistaa etu- ja sivuikkunoihin.
   const fill=new THREE.HemisphereLight(0xb4bccb,0x1b1c20,0.34);
+  // Päivätaivaan hajavalo Maan pinnalla ja nousun alussa.
+  const skyLight=new THREE.HemisphereLight(0xa9cdff,0x6a6f78,0);
   const bounce=new THREE.HemisphereLight(0xfff0dc,0x4a4640,0);
   const ceiling=new THREE.PointLight(0xffe9cf,1.5,6,1.4);
   ceiling.position.set(0,0.9,-0.1);
@@ -252,7 +258,7 @@ export function createCockpit(host, state) {
   towerGlow.position.set(0,-0.36,-1.25);
   const engine=new THREE.PointLight(0xff8a3a,0,6,2);
   engine.position.set(0,-0.6,1.6);
-  cabinScene.add(sunBeam,sunBeam.target,shine,shine.target,fill,bounce,ceiling,screenGlow,towerGlow,engine);
+  cabinScene.add(sunBeam,sunBeam.target,shine,shine.target,fill,skyLight,bounce,ceiling,screenGlow,towerGlow,engine);
   const sunLocal=new THREE.Vector3(), lastSun=new THREE.Vector3(), inverse=new THREE.Quaternion(), shineLocal=new THREE.Vector3(), toSun=new THREE.Vector3();
 
   // Katse: raahaus kääntää päätä ohjaamossa, asentoanturit lisäävät puhelimen kääntymisen.
@@ -279,7 +285,7 @@ export function createCockpit(host, state) {
 
   // Aluksen asento: nokka osoittaa kohteeseen aim, ja asento kääntyy pehmeästi.
   const look=new THREE.Matrix4(), want=new THREE.Quaternion(), origin=new THREE.Vector3(), up=new THREE.Vector3(0,1,0);
-  const spinQ=new THREE.Quaternion();
+  const spinQ=new THREE.Quaternion(), shakeQ=new THREE.Quaternion(), shakeE=new THREE.Euler();
   let attitudeReady=false;
 
   let running=false, frame=null, lastFrame=0, lastRender=0, auxDrawn=-Infinity;
@@ -322,7 +328,8 @@ export function createCockpit(host, state) {
         else if(p.level===2 && px<HIRES_BACK_PX) setLevel(p,1);
       }
     }
-    if(s.aim) {look.lookAt(origin,rel(bodyState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
+    if(s.nose) {look.lookAt(origin,toScene(s.nose),toScene(s.up ?? [0,0,1]).normalize()); want.setFromRotationMatrix(look);}
+    else if(s.aim) {look.lookAt(origin,rel(bodyState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
     else want.copy(ship.quaternion);
     if(!attitudeReady) {ship.quaternion.copy(want); attitudeReady=true;}
     const turning=ship.quaternion.angleTo(want)>1e-4;
@@ -331,9 +338,17 @@ export function createCockpit(host, state) {
     if(orientation) head.quaternion.multiply(orientation);
 
     // Laukaisun tärinä ja moottorin hehku vaimenevat muutamassa sekunnissa; lähtölaskennan lopussa jyrinä alkaa.
-    const age=s.launchAge, rumble=age<SHAKE_MS ? 1-age/SHAKE_MS : s.countdown!=null && s.countdown<1500 ? 0.4 : 0;
-    camera.position.set((Math.random()-0.5)*0.03*rumble,(Math.random()-0.5)*0.03*rumble,0);
-    engine.intensity=rumble*18*(0.85+Math.random()*0.3);
+    // Tärinä: nopeaa satunnaista värinää, jonka päällä on hitaampaa heiluntaa (rungon ja moottorien matalat taajuudet),
+    // sekä pientä kiertoa, jotta koko näkymä ei vain siirry vaan myös nytkähtelee.
+    const rumble=Math.max(0,Math.min(1,s.shake ?? 0)), tt=now/1000, jitter=k=>(Math.random()-0.5)*k*rumble;
+    camera.position.set(jitter(0.022)+Math.sin(tt*23)*0.006*rumble,jitter(0.03)+(Math.sin(tt*31)*0.4+Math.sin(tt*47+1)*0.3)*0.012*rumble,jitter(0.012));
+    head.quaternion.multiply(shakeQ.setFromEuler(shakeE.set(jitter(0.014),jitter(0.01),jitter(0.012))));
+    engine.intensity=(s.thrust ?? 0)*18*(0.85+Math.random()*0.3);
+    // Päivätaivas: tausta sinistyy ja tähdet himmenevät; ilmakehän yläpuolella taivas on musta.
+    const sky=Math.max(0,Math.min(1,s.sky ?? 0));
+    scene.background.copy(SKY).multiplyScalar(sky);
+    starField.traverse(o=>{if(o.material) o.material.opacity=Math.max(0,1-sky*2.5);});
+    skyLight.intensity=1.6*sky;
     cabinCamera.position.copy(camera.position); cabinCamera.quaternion.copy(head.quaternion);
 
     // Auringonvalo ohjaamossa: suunta aluksen koordinaatistossa, kirkkaus himmenee loivasti etäisyyden kasvaessa
