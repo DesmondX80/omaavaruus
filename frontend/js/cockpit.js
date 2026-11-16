@@ -10,6 +10,7 @@ import * as THREE from './vendor/three-0.170.0.module.min.js';
 import { FLIGHT_BODIES, MOONS, bodyState } from './flight.js';
 import { PLANETS, SUN_RADIUS_KM } from './planets.js';
 import { BRIGHT_STARS } from './stars.js';
+import { buildCabin, display, screen } from './cabin.js';
 import { glowCanvas, planetCanvas, ringCanvas } from './textures.js';
 
 const KM = 1000;
@@ -84,76 +85,47 @@ function stars() {
   return group;
 }
 
-// Ohjaamo yksinkertaisista muodoista. Kamera on silmien kohdalla origossa ja katsoo −z-suuntaan.
-function cabin(screens) {
-  const group=new THREE.Group();
-  const frame=new THREE.MeshStandardMaterial({color:0x2c3446, roughness:0.75, metalness:0.35, emissive:0x0a0d15});
-  const dark=new THREE.MeshStandardMaterial({color:0x161b26, roughness:0.9, metalness:0.1, emissive:0x06080c});
-  const seat=new THREE.MeshStandardMaterial({color:0x3a2a22, roughness:0.95, emissive:0x0c0806});
-  const box=(w,h,d,mat,x,y,z,rx=0,ry=0,rz=0)=>{
-    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
-    m.position.set(x,y,z); m.rotation.set(rx,ry,rz); group.add(m); return m;
-  };
-  // Etuikkunan kehys.
-  box(3.0,0.14,0.14,frame,0,0.78,-1.15);
-  box(3.0,0.16,0.16,frame,0,-0.42,-1.1);
-  box(0.14,1.3,0.14,frame,-1.2,0.18,-1.12,0,0,-0.12);
-  box(0.14,1.3,0.14,frame,1.2,0.18,-1.12,0,0,0.12);
-  // Sivuikkunoiden tolpat ja katto.
-  box(0.12,1.4,0.12,frame,-1.55,0.15,0.1,0.15,0,-0.1);
-  box(0.12,1.4,0.12,frame,1.55,0.15,0.1,0.15,0,0.1);
-  box(0.12,0.12,1.3,frame,-1.4,0.8,-0.5);
-  box(0.12,0.12,1.3,frame,1.4,0.8,-0.5);
-  box(3.2,0.06,0.9,dark,0,0.9,0.35);
-  // Seinät ikkunoiden alla, takaseinä ja lattia.
-  box(0.08,0.8,2.4,dark,-1.62,-0.85,-0.1);
-  box(0.08,0.8,2.4,dark,1.62,-0.85,-0.1);
-  box(3.3,2.2,0.08,dark,0,0,1.05);
-  box(3.3,0.06,2.4,dark,0,-1.25,-0.1);
-  // Kojelauta ja sen näytöt.
-  box(2.7,0.1,0.75,frame,0,-0.5,-0.78,0.32);
-  box(2.7,0.55,0.08,dark,0,-0.8,-1.08);
-  screens.forEach((s,i)=>{
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(0.62,0.31),new THREE.MeshBasicMaterial({map:s.texture, toneMapped:false}));
-    m.position.set((i-1)*0.72,-0.435,-0.74); m.rotation.set(-Math.PI/2+0.32+0.55,0,0);
-    m.rotation.y=-(i-1)*0.18;
-    group.add(m);
-  });
-  // Istuin näkyy, kun katsoo alas tai taakse.
-  box(0.7,0.12,0.6,seat,0,-0.95,0.25);
-  box(0.7,1.0,0.12,seat,0,-0.45,0.6,-0.12);
-  box(0.4,0.25,0.12,seat,0,0.2,0.66,-0.12);
-  box(0.1,0.1,0.55,seat,-0.42,-0.7,0.2);
-  box(0.1,0.1,0.55,seat,0.42,-0.7,0.2);
-  // Ohut lasi heijastaa hieman sinistä.
-  const glass=new THREE.Mesh(new THREE.PlaneGeometry(2.3,1.15),new THREE.MeshBasicMaterial({color:0x8fb4ff, transparent:true, opacity:0.035, depthWrite:false}));
-  glass.position.set(0,0.18,-1.13); group.add(glass);
-  return group;
+// Kattonäyttöjen sisältö. Navigointinäyttö: aurinkokunta ylhäältä (ekliptikan pohjoispuolelta), planeetat radoillaan,
+// alus ja suunta kohteeseen. Mittakaava sovitetaan niin, että alus ja kohde mahtuvat kuvaan.
+function drawNav(ctx, w, h, t, shipKm, aim) {
+  const AU=149597870.7, cx=w/2, cy=h/2+14, target=aim ? bodyState(aim,t).r : null;
+  const reach=Math.max(0.5,Math.hypot(shipKm[0],shipKm[1])/AU,target ? Math.hypot(target[0],target[1])/AU : 0)*1.15, k=(h/2-30)/reach;
+  const px=r=>[cx+r[0]/AU*k, cy-r[1]/AU*k];
+  ctx.fillStyle='#5ed6ff'; ctx.font='600 24px system-ui, sans-serif'; ctx.fillText('NAVIGOINTI',18,36);
+  ctx.fillStyle='#8b9ac0'; ctx.font='18px ui-monospace, monospace'; ctx.textAlign='right';
+  ctx.fillText(`säde ${reach<10 ? reach.toFixed(1).replace('.',',') : Math.round(reach)} AU`,w-18,34); ctx.textAlign='left';
+  ctx.save(); ctx.beginPath(); ctx.rect(8,46,w-16,h-54); ctx.clip();
+  ctx.lineWidth=1.5;
+  for(const p of PLANETS) {
+    const r=bodyState(p.name,t).r, [x,y]=px(r);
+    ctx.strokeStyle='rgba(94,214,255,.22)'; ctx.beginPath(); ctx.arc(cx,cy,Math.hypot(r[0],r[1])/AU*k,0,2*Math.PI); ctx.stroke();
+    ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(x,y,p.name===aim ? 6 : 4,0,2*Math.PI); ctx.fill();
+  }
+  ctx.fillStyle='#ffd27a'; ctx.beginPath(); ctx.arc(cx,cy,6,0,2*Math.PI); ctx.fill();
+  const [sx,sy]=px(shipKm);
+  if(target) {
+    const [tx,ty]=px(target);
+    ctx.strokeStyle='#4ade80'; ctx.setLineDash([6,5]); ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(tx,ty); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle='#4ade80'; ctx.beginPath(); ctx.arc(tx,ty,11,0,2*Math.PI); ctx.stroke();
+    ctx.fillStyle='#4ade80'; ctx.font='16px ui-monospace, monospace'; ctx.fillText(aim.toUpperCase(),tx+15,ty+5);
+  }
+  ctx.strokeStyle='#ffffff'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(sx-9,sy); ctx.lineTo(sx+9,sy); ctx.moveTo(sx,sy-9); ctx.lineTo(sx,sy+9); ctx.stroke();
+  ctx.restore();
 }
-
-// Kojelaudan näyttö: canvas-tekstuuri, johon kirjoitetaan otsikko ja rivit.
-function display() {
-  const c=document.createElement('canvas'); c.width=512; c.height=256;
-  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace;
-  let last='';
-  return {texture:t, draw(title, lines, bar = null) {
-    const key=JSON.stringify([title,lines,bar]);
-    if(key===last) return;
-    last=key;
-    const ctx=c.getContext('2d');
-    ctx.fillStyle='#03121a'; ctx.fillRect(0,0,512,256);
-    ctx.strokeStyle='#1d4a5c'; ctx.lineWidth=6; ctx.strokeRect(3,3,506,250);
-    ctx.fillStyle='#5ed6ff'; ctx.font='600 28px system-ui, sans-serif'; ctx.fillText(title,24,46);
-    lines.forEach(([text,size,color],i)=>{
-      ctx.fillStyle=color ?? '#e8eefc'; ctx.font=`${size ?? 40}px ui-monospace, monospace`;
-      ctx.fillText(text,24,104+i*56);
-    });
+// Järjestelmänäyttö: polttoaine ja aikakiihdytys pelin tilasta, muut rivit ovat aluksen vakioarvoja.
+function drawSystems(ctx, w, h, fuel, warp, aim) {
+  ctx.fillStyle='#5ed6ff'; ctx.font='600 24px system-ui, sans-serif'; ctx.fillText('JÄRJESTELMÄT',18,36);
+  const rows=[['POLTTOAINE',fuel==null ? '' : `${Math.round(fuel*100)} %`,fuel],['AIKAKIIHDYTYS',warp>1 ? `${warp>=1e4 ? warp.toExponential(0).replace('e+','e') : warp}×` : '1×',null],
+    ['SUUNTA',aim ?? 'vapaa',null],['MOOTTORI','valmius',null],['SÄTEILYSUOJA','OK',null]];
+  rows.forEach(([name,value,bar],i)=>{
+    const y=78+i*42;
+    ctx.fillStyle='#8b9ac0'; ctx.font='20px ui-monospace, monospace'; ctx.textAlign='left'; ctx.fillText(name,18,y);
+    ctx.fillStyle=bar!=null && bar<=0.2 ? '#ff7b93' : '#e8eefc'; ctx.textAlign='right'; ctx.fillText(value,w-18,y); ctx.textAlign='left';
     if(bar!=null) {
-      ctx.fillStyle='#1d2740'; ctx.fillRect(24,200,464,24);
-      ctx.fillStyle=bar>0.2 ? '#4ade80' : '#ff7b93'; ctx.fillRect(24,200,464*Math.max(0,Math.min(1,bar)),24);
+      ctx.fillStyle='#1d2740'; ctx.fillRect(200,y-15,w-300,14);
+      ctx.fillStyle=bar>0.2 ? '#4ade80' : '#ff7b93'; ctx.fillRect(200,y-15,(w-300)*Math.max(0,Math.min(1,bar)),14);
     }
-    t.needsUpdate=true;
-  }};
+  });
 }
 
 /**
@@ -235,8 +207,11 @@ export function createCockpit(host, state) {
   const interior=new THREE.PointLight(0x9fb8ff,0.8,5,1);
   interior.position.set(0,0.6,0.3); ship.add(interior);
 
-  const screens=[display(),display(),display()];
-  ship.add(cabin(screens));
+  const screens=[display(),display(),display()], nav=screen(512,288), systems=screen(512,288);
+  ship.add(buildCabin(screens,nav,systems));
+  // Näyttöjen hohde valaisee kojelautaa ja lentäjän puolta ohjaamosta.
+  const screenGlow=new THREE.PointLight(0x5ed6ff,0.35,3,1.5);
+  screenGlow.position.set(0,-0.25,-0.75); ship.add(screenGlow);
 
   // Katse: raahaus kääntää päätä ohjaamossa, asentoanturit lisäävät puhelimen kääntymisen.
   let yaw=0, pitch=-0.05, dragging=null, orientation=null, orientationBase=null, moved=0;
@@ -265,12 +240,14 @@ export function createCockpit(host, state) {
   const spinQ=new THREE.Quaternion();
   let attitudeReady=false;
 
-  let running=false, frame=null, lastFrame=0, lastRender=0;
+  let running=false, frame=null, lastFrame=0, lastRender=0, auxDrawn=-Infinity;
   function resize() {
     const w=host.clientWidth, h=host.clientHeight;
     if(!w||!h) return;
     const size=renderer.getSize(new THREE.Vector2());
-    if(size.x!==w||size.y!==h) {renderer.setSize(w,h,false); camera.aspect=w/h; camera.fov=w<h ? 80 : 65; camera.updateProjectionMatrix();}
+    if(size.x!==w||size.y!==h) {renderer.setSize(w,h,false); camera.aspect=w/h;
+      // Pystykulma valitaan niin, että kojelaudan kolme näyttöä ja kattonäytöt mahtuvat kuvaan myös kapeammassa ikkunassa.
+      camera.fov=Math.max(65,Math.min(80,2*Math.atan(Math.tan(48*Math.PI/180)/(w/h))*180/Math.PI)); camera.updateProjectionMatrix();}
   }
 
   function update(now) {
@@ -311,6 +288,13 @@ export function createCockpit(host, state) {
 
     const [a,b,c]=s.screens;
     screens[0].draw(...a); screens[1].draw(...b); screens[2].draw(...c);
+    // Kattonäytöt päivittyvät enintään kahdesti sekunnissa.
+    if(now-auxDrawn>500) {
+      auxDrawn=now;
+      const fuel=s.screens.find(x=>x[2]!=null)?.[2] ?? null;
+      nav.draw(`${t}|${s.aim}`,(ctx,w,h)=>drawNav(ctx,w,h,t,view.r,s.aim));
+      systems.draw(`${fuel}|${s.warp}|${s.aim}`,(ctx,w,h)=>drawSystems(ctx,w,h,fuel,s.warp,s.aim));
+    }
     return rumble>0 || turning || s.warp>1 || now-moved<1000;
   }
 

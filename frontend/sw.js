@@ -16,6 +16,7 @@ const SHELL = [
   "config.js",
   "manifest.webmanifest",
   "js/main.js",
+  "js/cabin.js",
   "js/calendar.js",
   "js/cameras.js",
   "js/cockpit.js",
