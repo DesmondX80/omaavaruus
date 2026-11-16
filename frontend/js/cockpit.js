@@ -39,13 +39,15 @@ function texture(canvas) {
 // siihen asti (tai jos haku epäonnistuu) pinnalla on textures.js:n piirretty tekstuuri. Titanilla ei ole kuvaa:
 // sen pinta on oranssin utukerroksen peitossa, joten piirretty tekstuuri vastaa sitä, miltä kuu näyttää avaruudesta.
 const PHOTO_BODIES = new Set(['Merkurius','Venus','Maa','Mars','Jupiter','Saturnus','Uranus','Neptunus','Kuu','Phobos','Io','Europa','Ganymedes','Enceladus','Triton']);
-const PHOTO_MIN_PX = 3;
+// Tarkemmat kartat, jotka haetaan vasta lähellä kohdetta: suurin saatavilla oleva leveys (4096 tai 8192 pikseliä).
+const HIRES = {Merkurius:8192, Venus:4096, Maa:8192, Mars:8192, Jupiter:4096, Saturnus:4096, Kuu:8192};
+// Kiekon säde ruudulla (CSS-pikseleinä), jolla kuva haetaan, jolla vaihdetaan tarkkaan karttaan ja jolla palataan takaisin.
+const PHOTO_MIN_PX = 3, HIRES_PX = 200, HIRES_BACK_PX = 120;
 const loader = new THREE.TextureLoader();
-function loadPhoto(file, material, onLoad) {
+function loadPhoto(file, onLoad) {
   loader.load(new URL(`../textures/${file}.webp`,import.meta.url).href,t=>{
     t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8;
-    material.map?.dispose(); material.map=t; material.needsUpdate=true;
-    onLoad();
+    onLoad(t);
   },undefined,()=>{});
 }
 
@@ -204,8 +206,27 @@ export function createCockpit(host, state) {
     }
     const tilt=new THREE.Quaternion();
     if(POLES[p.name]) tilt.setFromUnitVectors(new THREE.Vector3(0,1,0),toScene(equatorial(POLES[p.name][0]/15,POLES[p.name][1])).normalize());
-    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot, ringMaterial, tilt, photo:!PHOTO_BODIES.has(p.name)};
+    return {name:p.name, radiusKm:p.radiusKm, moon:p.moon, mesh, dot, ringMaterial, tilt, level:0, ring:false};
   });
+
+  // Tekstuurin tarkkuustaso: 0 piirretty, 1 peruskartta (2k), 2 tarkka kartta. Tarkan kartan leveys rajataan laitteen
+  // mukaan: 8k vain, jos näytönohjain tukee sitä eikä laite ole kosketusnäyttöinen (8k-kuva vie muistia noin 180 Mt).
+  const hiresMax=renderer.capabilities.maxTextureSize>=8192 && !matchMedia('(pointer: coarse)').matches ? 8192 : Math.min(4096,renderer.capabilities.maxTextureSize);
+  const hiresWidth=name=>Math.min(HIRES[name] ?? 0,hiresMax);
+  function setLevel(p, level) {
+    p.level=level;
+    const file=p.name.toLowerCase()+(level===2 ? `-${hiresWidth(p.name)/1024}k` : '');
+    loadPhoto(file,t=>{
+      // Taso on voinut vaihtua haun aikana; vanhentunut kuva hylätään.
+      if(p.level!==level) {t.dispose(); return;}
+      p.mesh.material.map?.dispose(); p.mesh.material.map=t; p.mesh.material.needsUpdate=true;
+      moved=performance.now();
+    });
+    if(p.ringMaterial && !p.ring) {
+      p.ring=true;
+      loadPhoto('saturnus-renkaat',t=>{p.ringMaterial.map?.dispose(); p.ringMaterial.map=t; p.ringMaterial.needsUpdate=true; moved=performance.now();});
+    }
+  }
 
   // Moottorin hehku valaisee ohjaamon laukaisussa takaa.
   // Valojen kantama on rajattu muutamaan metriin, jotta ne eivät valaise planeettoja.
@@ -268,11 +289,11 @@ export function createCockpit(host, state) {
       // Piste piilotetaan, kun pallo näkyy itse riittävän suurena. Kuun piste näkyy vain alle 20 milj. km päästä.
       const px=p.radiusKm*KM/pos.length()*k;
       p.dot.visible=px<2 && (!p.moon || pos.length()<2e10);
-      if(!p.photo && px>PHOTO_MIN_PX) {
-        p.photo=true;
-        const loaded=()=>{moved=performance.now();};
-        loadPhoto(p.name.toLowerCase(),p.mesh.material,loaded);
-        if(p.ringMaterial) loadPhoto('saturnus-renkaat',p.ringMaterial,loaded);
+      if(PHOTO_BODIES.has(p.name)) {
+        const hires=hiresWidth(p.name)>2048;
+        if(p.level===0 && px>PHOTO_MIN_PX) setLevel(p,hires && px>HIRES_PX ? 2 : 1);
+        else if(p.level===1 && hires && px>HIRES_PX) setLevel(p,2);
+        else if(p.level===2 && px<HIRES_BACK_PX) setLevel(p,1);
       }
     }
     if(s.aim) {look.lookAt(origin,rel(bodyState(s.aim,t).r),up); want.setFromRotationMatrix(look);}
