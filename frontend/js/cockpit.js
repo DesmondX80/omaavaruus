@@ -21,6 +21,17 @@ const SPIN_HOURS = {Merkurius:1407.6, Venus:-5832.5, Maa:23.934, Mars:24.623, Ju
 // Pyörähdysakselien pohjoisnavat (IAU, J2000): [rektaskensio°, deklinaatio°]. Kuiden akselit ovat pystyssä.
 const POLES = {Merkurius:[281.01,61.41], Venus:[272.76,67.16], Maa:[0,90], Mars:[317.68,52.89], Jupiter:[268.06,64.5], Saturnus:[40.59,83.54], Uranus:[257.31,-15.18], Neptunus:[299.36,43.46]};
 const SHAKE_MS = 7000;
+
+// Osuus Auringon kiekosta, jonka sen edessä oleva kappale peittää aluksesta katsottuna: kahden ympyrän leikkausala
+// jaettuna Auringon kiekon alalla. sunR ja bodyR ovat kiekkojen kulmasäteet ja sep niiden keskipisteiden kulmaetäisyys.
+function covered(sunR, bodyR, sep) {
+  if(sep>=sunR+bodyR) return 0;
+  if(sep<=Math.abs(bodyR-sunR)) return bodyR>=sunR ? 1 : (bodyR/sunR)**2;
+  const a=sunR*sunR, b=bodyR*bodyR;
+  const lens=a*Math.acos((sep*sep+a-b)/(2*sep*sunR))+b*Math.acos((sep*sep+b-a)/(2*sep*bodyR))
+    -0.5*Math.sqrt((-sep+sunR+bodyR)*(sep+sunR-bodyR)*(sep-sunR+bodyR)*(sep+sunR+bodyR));
+  return lens/(Math.PI*a);
+}
 const WHITE = new THREE.Color(0xffffff);
 
 const toScene = ([x,y,z]) => new THREE.Vector3(x,z,-y);
@@ -291,10 +302,13 @@ export function createCockpit(host, state) {
     sunCore.position.copy(sun); sunLight.position.copy(sun);
     sunGlow.position.copy(sun); sunGlow.scale.setScalar(sun.length()*0.16);
     const k=renderer.domElement.clientHeight/2/Math.tan(camera.fov*Math.PI/360);
-    let nearest=null, nearestSize=0;
+    // sunlit on Auringon kiekosta näkyvä osuus: planeetan tai kuun varjossa (yöpuolella tai pimennyksessä) se on nolla.
+    const sunDistance=sun.length(), sunRadius=Math.asin(Math.min(1,SUN_RADIUS_KM*KM/sunDistance));
+    let nearest=null, nearestSize=0, sunlit=1;
     for(const p of planets) {
       const pos=rel(bodyState(p.name,t).r);
       if(p.radiusKm*KM/pos.length()>nearestSize) {nearestSize=p.radiusKm*KM/pos.length(); nearest=p;}
+      if(pos.length()<sunDistance) sunlit*=1-covered(sunRadius,Math.asin(Math.min(1,p.radiusKm*KM/pos.length())),pos.angleTo(sun));
       p.mesh.position.copy(pos); p.dot.position.copy(pos);
       const spin=p.moon ? 2*Math.PI*((t-Date.UTC(2000,0,1,12))/(MOONS[p.name].periodDays*86400000)%1) : 2*Math.PI*((t/3600000/SPIN_HOURS[p.name])%1);
       p.mesh.quaternion.copy(p.tilt).multiply(spinQ.setFromAxisAngle(up,spin));
@@ -327,7 +341,8 @@ export function createCockpit(host, state) {
     inverse.copy(ship.quaternion).invert();
     sunLocal.copy(sun).normalize().applyQuaternion(inverse);
     sunBeam.position.copy(sunLocal).multiplyScalar(8);
-    sunBeam.intensity=3.4*Math.max(0.3,Math.min(1.3,Math.sqrt(AU_KM*KM/sun.length())));
+    sunBeam.intensity=3.4*Math.max(0.3,Math.min(1.3,Math.sqrt(AU_KM*KM/sunDistance)))*sunlit;
+    sunGlow.material.opacity=sunlit;
     if(sunLocal.distanceToSquared(lastSun)>1e-7) {lastSun.copy(sunLocal); sunBeam.shadow.needsUpdate=true;}
     bounce.intensity=sunBeam.intensity*0.22*Math.max(0,Math.min(1,-sunLocal.z*0.9+Math.abs(sunLocal.x)*0.5+sunLocal.y*0.2));
     // Lähimmän kappaleen heijastama valo: valaistun puolen osuus (vaihe) kertaa kiekon peittämä osuus taivaasta.
