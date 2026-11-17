@@ -68,7 +68,7 @@ function orbitPath(ctx, el, toPx, w, h) {
 /**
  * Aurinkokunnan perusnäkymä kankaalle: tausta, kiertoradat, Aurinko ja planeetat nimineen sekä mittakaavajana.
  * toPx muuntaa ekliptikan koordinaatit (AU) pikseleiksi ja k on pikseliä per AU. Palauttaa kohteiden
- * napautusalueet. Myös Avaruuslennon kartta (voyage.js) piirtää tämän pohjalle.
+ * napautusalueet.
  */
 export function drawScene(ctx, planets, toPx, w, h, k, selected = null) {
   ctx.fillStyle='#03050b'; ctx.fillRect(0,0,w,h);

@@ -2,15 +2,16 @@
 import { el } from './core.js';
 
 export const VIEWS = ['nyt','revontulet','taivas','iss','kalenteri'];
-// Avaruuslento (#lento) avautuu koko näytön tilaan Aurinkokunta-kortin päälle, joten sen alla näkyy taivasnäkymä.
-const OVERLAYS = {lento:'taivas'};
+// Avaruuslento-peli on nyt oma pelinsä, Sisunautti. Vanhat #lento-linkit ohjataan sinne.
+export const GAME_URL = 'https://desmondx80.github.io/sisunautti/';
 export const currentView = () => {
   const hash=location.hash.slice(1);
-  return VIEWS.includes(hash) ? hash : OVERLAYS[hash] ?? VIEWS[0];
+  return VIEWS.includes(hash) ? hash : VIEWS[0];
 };
 
 let shown=null;
 function route() {
+  if(location.hash==='#lento') {location.replace(GAME_URL); return;}
   const name=currentView();
   // Koko näytön tilan avaaminen tai sulkeminen ei vaihda näkymää eikä vieritä sivua.
   if(name===shown) return;

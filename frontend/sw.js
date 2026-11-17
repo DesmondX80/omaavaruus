@@ -9,20 +9,16 @@ const DATA_MAX_ENTRIES = 30;
 const VIEWS = ["nyt", "revontulet", "taivas", "iss", "kalenteri"];
 
 // Sovelluksen tiedostot, jotka haetaan talteen heti asennuksessa (testi varmistaa, että lista kattaa frontend-hakemiston).
-// Avaruuslennon valokuvatekstuurit (textures/, noin 41 Mt) eivät ole listalla: ne talletetaan vasta, kun ohjaamo hakee ne.
 const SHELL = [
   "./",
   "styles.css",
   "config.js",
   "manifest.webmanifest",
   "js/main.js",
-  "js/cabin.js",
   "js/calendar.js",
   "js/cameras.js",
-  "js/cockpit.js",
   "js/core.js",
   "js/events.js",
-  "js/flight.js",
   "js/info.js",
   "js/iss.js",
   "js/issmap.js",
@@ -33,7 +29,6 @@ const SHELL = [
   "js/now.js",
   "js/outlook.js",
   "js/places.js",
-  "js/planetinfo.js",
   "js/planets.js",
   "js/push.js",
   "js/sheets.js",
@@ -42,10 +37,6 @@ const SHELL = [
   "js/skyview.js",
   "js/solarsystem.js",
   "js/solarwind.js",
-  "js/stars.js",
-  "js/textures.js",
-  "js/vendor/three-0.170.0.module.min.js",
-  "js/voyage.js",
   "js/weather.js",
   "icons/icon.svg",
   "icons/icon-180.png",
