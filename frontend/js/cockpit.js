@@ -21,7 +21,7 @@ const SPIN_HOURS = {Merkurius:1407.6, Venus:-5832.5, Maa:23.934, Mars:24.623, Ju
 // Pyörähdysakselien pohjoisnavat (IAU, J2000): [rektaskensio°, deklinaatio°]. Kuiden akselit ovat pystyssä.
 const POLES = {Merkurius:[281.01,61.41], Venus:[272.76,67.16], Maa:[0,90], Mars:[317.68,52.89], Jupiter:[268.06,64.5], Saturnus:[40.59,83.54], Uranus:[257.31,-15.18], Neptunus:[299.36,43.46]};
 // Päivätaivaan väri Maan pinnalta katsottuna.
-const SKY = new THREE.Color(0x4f8fd0);
+const SKY = new THREE.Color(0x4f8fd0), SKY_LIGHT = new THREE.Color(0xa9cdff);
 
 // Osuus Auringon kiekosta, jonka sen edessä oleva kappale peittää aluksesta katsottuna: kahden ympyrän leikkausala
 // jaettuna Auringon kiekon alalla. sunR ja bodyR ovat kiekkojen kulmasäteet ja sep niiden keskipisteiden kulmaetäisyys.
@@ -146,7 +146,7 @@ function drawSystems(ctx, w, h, fuel, warp, aim) {
  * Luo ohjaamonäkymän elementtiin host. state() palauttaa joka ruudulla pelin tilan:
  * {t, ship: {r, v} (aluksen paikka km ja nopeus Auringon suhteen), aim (planeetta, johon nokka osoittaa, tai null),
  *  nose ja up (valinnaiset ekliptikan suuntavektorit, jotka korvaavat aim-suunnan), warp, shake (tärinä 0–1),
- *  thrust (moottorin hehku 0–1), sky (päivätaivaan kirkkaus 0–1), screens (kolmen näytön otsikko ja rivit)}.
+ *  thrust (moottorin hehku 0–1), sky (taivaan kirkkaus 0–1; väri skyColor, oletuksena päivätaivaan sininen), screens (kolmen näytön otsikko ja rivit)}.
  * Palauttaa {start, stop, resetView} tai heittää virheen, jos WebGL ei ole käytettävissä.
  */
 export function createCockpit(host, state) {
@@ -259,6 +259,14 @@ export function createCockpit(host, state) {
   const engine=new THREE.PointLight(0xff8a3a,0,6,2);
   engine.position.set(0,-0.6,1.6);
   cabinScene.add(sunBeam,sunBeam.target,shine,shine.target,fill,skyLight,bounce,ceiling,screenGlow,towerGlow,engine);
+  // Ilmajarrutuksen plasma: hehkuvat tasot etu- ja sivuikkunoiden ulkopuolella, näkyvissä vain kun peli antaa taivaalle oman värin.
+  const plasmaMaterial=new THREE.MeshBasicMaterial({color:0xff6a1f, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide, toneMapped:false});
+  const plasma=new THREE.Group();
+  for(const [x,z,ry,w] of [[0,-1.8,0,4.6],[-2.3,-0.6,Math.PI/2,2.6],[2.3,-0.6,Math.PI/2,2.6]]) {
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,2.4),plasmaMaterial);
+    m.position.set(x,0.2,z); m.rotation.y=ry; plasma.add(m);
+  }
+  cabinScene.add(plasma);
   const sunLocal=new THREE.Vector3(), lastSun=new THREE.Vector3(), inverse=new THREE.Quaternion(), shineLocal=new THREE.Vector3(), toSun=new THREE.Vector3();
 
   // Katse: raahaus kääntää päätä ohjaamossa, asentoanturit lisäävät puhelimen kääntymisen.
@@ -285,6 +293,7 @@ export function createCockpit(host, state) {
 
   // Aluksen asento: nokka osoittaa kohteeseen aim, ja asento kääntyy pehmeästi.
   const look=new THREE.Matrix4(), want=new THREE.Quaternion(), origin=new THREE.Vector3(), up=new THREE.Vector3(0,1,0);
+  const skyTint=new THREE.Color();
   const spinQ=new THREE.Quaternion(), shakeQ=new THREE.Quaternion(), shakeE=new THREE.Euler();
   let attitudeReady=false;
 
@@ -346,7 +355,10 @@ export function createCockpit(host, state) {
     engine.intensity=(s.thrust ?? 0)*18*(0.85+Math.random()*0.3);
     // Päivätaivas: tausta sinistyy ja tähdet himmenevät; ilmakehän yläpuolella taivas on musta.
     const sky=Math.max(0,Math.min(1,s.sky ?? 0));
-    scene.background.copy(SKY).multiplyScalar(sky);
+    scene.background.copy(s.skyColor ? skyTint.set(s.skyColor) : SKY).multiplyScalar(sky);
+    skyLight.color.copy(s.skyColor ? skyTint : SKY_LIGHT);
+    plasma.visible=!!s.skyColor;
+    if(s.skyColor) {plasmaMaterial.color.copy(skyTint); plasmaMaterial.opacity=sky*(0.55+Math.random()*0.2);}
     starField.traverse(o=>{if(o.material) o.material.opacity=Math.max(0,1-sky*2.5);});
     skyLight.intensity=1.6*sky;
     cabinCamera.position.copy(camera.position); cabinCamera.quaternion.copy(head.quaternion);

@@ -17,16 +17,19 @@ export const FUEL_KMS = 14;
 // Kiviplaneetoilla alus jarruttaa matalalle ympyräradalle noin 500 km korkeuteen; Maassa rata on 200 km, jonne
 // kantoraketti nostaa aluksen. Jättiläisplaneetoilla perikeskus on heti pilvien yläpuolella (Juno ohittaa Jupiterin
 // noin 4 000 km:n ja Cassini ohitti Saturnuksen noin 3 000 km:n korkeudelta), mutta rata on venynyt: matalalle
-// ympyräradalle jarruttaminen veisi 7–17 km/s, eikä sieltä pääsisi enää pois.
+// ympyräradalle jarruttaminen moottorilla veisi 7–17 km/s. low on matala ympyrärata, jolle jättiläisplaneetalla
+// päästään ilmajarrutuksella: alus sukeltaa kaasukehän yläosaan (noin 200 km pilvien yläpuolelle), ja ilmanvastus
+// jarruttaa sen radalle. Lähtö matalalta radalta maksaa silti täyden hinnan.
+const AERO_ALT_KM = 200;
 const BODIES = {
   Merkurius: {mu:22031.86, orbit:[500,500]},
   Venus: {mu:324858.59, orbit:[500,500]},
   Maa: {mu:398600.44, orbit:[200,200]},
   Mars: {mu:42828.37, orbit:[500,500]},
-  Jupiter: {mu:126686531.9, orbit:[5000,2000000]},
-  Saturnus: {mu:37931206.2, orbit:[3000,1500000]},
-  Uranus: {mu:5793951.3, orbit:[3000,500000]},
-  Neptunus: {mu:6835099.5, orbit:[3000,500000]},
+  Jupiter: {mu:126686531.9, orbit:[5000,2000000], low:5000},
+  Saturnus: {mu:37931206.2, orbit:[3000,1500000], low:3000},
+  Uranus: {mu:5793951.3, orbit:[3000,500000], low:3000},
+  Neptunus: {mu:6835099.5, orbit:[3000,500000], low:3000},
 };
 
 /**
@@ -34,10 +37,31 @@ const BODIES = {
  * Vaikutuspiirin sisällä aluksen liikettä hallitsee planeetan painovoima, sen ulkopuolella Auringon.
  */
 export const FLIGHT_BODIES = Object.fromEntries(PLANETS.map(p=>{
-  const {mu,orbit}=BODIES[p.name], a=elements(p.name,Date.UTC(2000,0,1,12)).a*AU_KM;
-  return [p.name, {name:p.name, radiusKm:p.radiusKm, mu, soiKm:a*(mu/MU_SUN)**0.4,
-    periKm:p.radiusKm+orbit[0], apoKm:p.radiusKm+orbit[1]}];
+  const {mu,orbit,low}=BODIES[p.name], a=elements(p.name,Date.UTC(2000,0,1,12)).a*AU_KM;
+  const capture={periKm:p.radiusKm+orbit[0], apoKm:p.radiusKm+orbit[1]};
+  return [p.name, {name:p.name, radiusKm:p.radiusKm, mu, soiKm:a*(mu/MU_SUN)**0.4, ...capture,
+    capture, low:low ? {periKm:p.radiusKm+low, apoKm:p.radiusKm+low} : null}];
 }));
+/** Onko planeetalla matala ympyrärata, jolle pääsee ilmajarrutuksella. */
+export const hasLowOrbit = body => !!FLIGHT_BODIES[body]?.low;
+/**
+ * Valitsee, kummalla radalla alus on planeetan luona: matalalla ympyräradalla (low = true) vai kaappausradalla.
+ * Pelissä on yksi alus, joten valinta tehdään suoraan planeetan tietoihin: lähdön Δv, kiertoaika ja polttokohta
+ * lasketaan sen jälkeen tältä radalta. Valinta palautetaan kaappausradaksi, kun alus lähtee planeetalta.
+ */
+export function setLowOrbit(body, low) {
+  const b=FLIGHT_BODIES[body];
+  if(b?.low) Object.assign(b,low ? b.low : b.capture);
+}
+/**
+ * Ilmajarrutuksen jälkeinen poltto (km/s): kaasukehän läpi kuljettuaan alus on ellipsillä, jonka apokeskus on
+ * matalan radan korkeudella ja perikeskus kaasukehässä. Apokeskuksessa perikeskus nostetaan samalle korkeudelle:
+ * Δv = v_ympyrä·(1 − √(2·r_ilma/(r_ilma + r))).
+ */
+export function aerobrakeDv(body) {
+  const {mu,radiusKm,low}=FLIGHT_BODIES[body], r=low.periKm, rAir=radiusKm+AERO_ALT_KM;
+  return Math.sqrt(mu/r)*(1-Math.sqrt(2*rAir/(rAir+r)));
+}
 
 const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
 const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];

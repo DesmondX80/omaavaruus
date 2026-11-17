@@ -612,6 +612,33 @@ describe("laukaisu, lähtöpoltto ja saapumisrata (flight.js)", async () => {
     expect(F.norm(sub(s.r, r))).toBeLessThan(1e-3);
   });
 
+  it("ilmajarrutus vie jättiläisplaneetalla matalalle ympyräradalle, jolta lähtö on kallis", () => {
+    for (const name of ["Jupiter", "Saturnus", "Uranus", "Neptunus"]) {
+      const b = F.FLIGHT_BODIES[name], high = F.burnDv(name, 5.5);
+      expect(F.hasLowOrbit(name)).toBe(true);
+      // Radan nosto ilmajarrutuksen jälkeen on halpa.
+      expect(F.aerobrakeDv(name)).toBeGreaterThan(0.1);
+      expect(F.aerobrakeDv(name)).toBeLessThan(1);
+      F.setLowOrbit(name, true);
+      expect(b.apoKm).toBe(b.periKm);
+      expect(b.periKm - b.radiusKm).toBeLessThanOrEqual(5000);
+      const low = F.burnDv(name, 5.5);
+      // Matalalla radalla kierros kestää tunteja, venyneellä päiviä.
+      expect(F.orbitPeriod(name)).toBeLessThan(6 * 3600);
+      F.setLowOrbit(name, false);
+      expect(low).toBeGreaterThan(high + 5);
+      expect(F.burnDv(name, 5.5)).toBeCloseTo(high, 12);
+      expect(F.orbitPeriod(name)).toBeGreaterThan(86400);
+    }
+    // Jupiterin matalalta radalta lähtö ylittää kemiallisen raketin koko budjetin.
+    F.setLowOrbit("Jupiter", true);
+    expect(F.burnDv("Jupiter", 5.5)).toBeGreaterThan(F.SHIPS.kemiallinen.fuel);
+    F.setLowOrbit("Jupiter", false);
+    expect(F.hasLowOrbit("Mars")).toBe(false);
+    F.setLowOrbit("Mars", true);
+    expect(F.FLIGHT_BODIES.Mars.periKm - F.FLIGHT_BODIES.Mars.radiusKm).toBe(500);
+  });
+
   it("saapumisradat ovat matalia ja kemiallinen raketti pääsee niille", () => {
     const alt = (name) => F.FLIGHT_BODIES[name].periKm - F.FLIGHT_BODIES[name].radiusKm;
     for (const name of ["Merkurius", "Venus", "Mars"]) {

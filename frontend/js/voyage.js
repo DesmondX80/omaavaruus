@@ -6,7 +6,7 @@
 // tai taustalla, aika kulkee oikeaa vauhtia (1×), joten raketti lentää myös sovelluksen ollessa kiinni.
 // Kello pysähtyy laukaisuhetkeen ja saapumiseen, jotta ne eivät mene ohi.
 import { el, num, saved, button } from './core.js';
-import { ASCENT_S, FLIGHT_BODIES, FUEL_KMS, MOONS, SHIPS, applyBurn, assistTransfer, autoCorrect, bodyState, canRefuel, departureState, flightStats, fmtDuration, injectionTime, isMoon, isPlanet, launchOrbit, launchState, localTransfer, moonsOf, nearestPlanet, norm, orbitAt, orbitOf, orbitPeriod, parkingState, planetState, shipState, shipView, soiEntry, soiExit, transfer, windowSearch } from './flight.js';
+import { ASCENT_S, FLIGHT_BODIES, FUEL_KMS, MOONS, SHIPS, aerobrakeDv, applyBurn, assistTransfer, autoCorrect, bodyState, burnDv as orbitBurnDv, canRefuel, departureState, flightStats, fmtDuration, hasLowOrbit, injectionTime, isMoon, isPlanet, launchOrbit, launchState, localTransfer, moonsOf, nearestPlanet, norm, orbitAt, orbitOf, orbitPeriod, parkingState, setLowOrbit, planetState, shipState, shipView, soiEntry, soiExit, transfer, windowSearch } from './flight.js';
 import { PLANET_INFO } from './planetinfo.js';
 import { AU_KM, LIGHT_AU_PER_MIN, solarSystem } from './planets.js';
 import { drawScene } from './solarsystem.js';
@@ -19,6 +19,8 @@ export const WARPS = [[1,'1×'],[10,'10×'],[100,'100×'],[3600,'1 h/s'],[86400,
 const WARP_LEAD = 2500;
 /** Lähtölaskennan pituus laukaisualustalla (s) ja aika lähtöpolton virityksestä aikaisimpaan polttoon (ms). */
 const PAD_COUNT_S = 10, ARM_LEAD = 10000;
+/** Ilmajarrutuksen tärinän ja plasman hehkun kesto ohjaamossa (ms oikeaa aikaa). */
+const AERO_MS = 10000;
 /** Polton tärinän kesto ohjaamossa (ms oikeaa aikaa). */
 const BURN_SHAKE_MS = 7000;
 // [genetiivi, illatiivi, partitiivi]
@@ -41,8 +43,9 @@ const SURVEY_MS = DAY;
 // (drift = {r, v, t}). Maa on kotiplaneetta, joten se on tutkittu alusta asti.
 // pad: alus on laukaisualustalla Maan pinnalla (uusi peli alkaa sieltä); ascent = {liftoff}, kun lähtölaskenta tai nousu on käynnissä.
 // orbit: pysäköintiradan vaihe ja suunta (flight.js parkingState), asetetaan radalle noustessa ja jarrutettaessa.
+// lowOrbit: jättiläisplaneetta, jonka matalalla ympyräradalla alus on ilmajarrutuksen jälkeen (muuten null).
 // ship: aluksen tyyppi (flight.js SHIPS); aluksen voi vaihtaa Maassa.
-const fresh = () => ({v:1, location:'Maa', pad:true, ascent:null, orbit:null, drift:null, ship:'kemiallinen', fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0,
+const fresh = () => ({v:1, location:'Maa', pad:true, ascent:null, orbit:null, lowOrbit:null, drift:null, ship:'kemiallinen', fuel:FUEL_KMS, simTime:Date.now(), realTime:Date.now(), warp:0,
   plan:null, flight:null, survey:null, explored:['Maa'], flights:[], log:[]});
 const parked = (name, t) => parkingState(name,t,game.orbit);
 const fuelMax = () => SHIPS[game.ship].fuel;
@@ -57,7 +60,7 @@ const BURN_SIZES = [[0.01,'10 m/s'],[0.05,'50 m/s'],[0.1,'100 m/s'],[0.5,'500 m/
 // 3D-ohjaamo (cockpit.js) ladataan vasta, kun se näytetään ensimmäisen kerran. Sen kangas säilyy elementissä
 // cockpitHost, jota siirretään näkymästä toiseen, joten WebGL-kontekstia ei luoda uudelleen.
 const VIEW_KEY = 'avaruuslento.view', PANEL_KEY = 'avaruuslento.panel';
-let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, burnAt=-Infinity;
+let view=saved.get(VIEW_KEY,'cockpit'), cockpit=null, cockpitLoad=null, cockpitError='', cockpitHost=null, burnAt=-Infinity, aeroAt=-Infinity;
 
 // --- Kello ---
 
@@ -102,8 +105,11 @@ function load() {
   game=s?.v===1 ? {...fresh(), pad:false, ...s} : fresh();
   // Jos tallennus jäi kiihdytykselle (selain suljettiin kesken), suljettu aika lasketaan silti 1×:nä.
   game.warp=0;
+  syncLowOrbit();
   simNow();
 }
+// Ratamalli (flight.js) laskee lähdön siltä radalta, jolla alus on: matala rata otetaan käyttöön vain sillä planeetalla.
+function syncLowOrbit() { for(const name of PLANET_NAMES) setLowOrbit(name,game.lowOrbit===name); }
 
 // --- Muotoilu ---
 
@@ -497,6 +503,19 @@ function burnPanel() {
   return d;
 }
 
+// Ilmajarrutus jättiläisplaneetalla: kuvaus ja painike, tai tyhjä lista, jos se ei ole mahdollinen (ionialus laskeutuu
+// spiraalina, ja radan nostoon tarvitaan hieman polttoainetta).
+function aeroOption(f) {
+  if(!hasLowOrbit(f.to) || f.spiralIn || f.miss || f.local) return [];
+  const b=FLIGHT_BODIES[f.to], cost=aerobrakeDv(f.to), alt=num(b.low.periKm-b.radiusKm);
+  if(game.fuel<cost) return [];
+  // Lähdön hinta arvioidaan samalla ylinopeudella, jolla alus saapui.
+  const leaveLow=orbitBurnDv(f.to,f.vinfArr,{mu:b.mu, ...b.low}), leaveHigh=orbitBurnDv(f.to,f.vinfArr,{mu:b.mu, ...b.capture});
+  const stuck=leaveLow>fuelMax() ? ` ${SHIPS[game.ship].name} (${fuelMax()} km/s) ei pääse sieltä enää pois.` : '';
+  return [make('p',null,`Ilmajarrutus: alus sukeltaa ${NAMES[f.to][0]} kaasukehän yläosaan, ja ilmanvastus jarruttaa sen ${alt} km:n ympyräradalle. Polttoainetta kuluu vain radan nostoon (${dv(cost)}). Lähtö matalalta radalta on kallis: noin ${dv(leaveLow)}, kun venyneeltä radalta se on noin ${dv(leaveHigh)}.${stuck}`),
+    actions(button('voyage-go','Ilmajarruta matalalle radalle',()=>capture(true)))];
+}
+
 function flying(body) {
   const f=game.flight, arrived=simNow()>=f.arrive;
   shownArrived=arrived;
@@ -508,16 +527,17 @@ function flying(body) {
   if(cockpitError) body.append(make('p','muted',cockpitError));
   if(arrived && f.miss) {
     body.append(make('p',null,`Alus ohitti ${NAMES[f.to][0]} ${fmtKm(f.missKm)} etäisyydeltä, vaikutuspiirin ulkopuolelta. Se jatkaa Auringon ympäri.`),
-      actions(button('voyage-go','Jatka ohilentoa',capture)));
+      actions(button('voyage-go','Jatka ohilentoa',()=>capture())));
   } else if(arrived && game.fuel>=f.dvArr-1e-9) {
-    body.append(make('p',null,f.spiralIn ? `Alus on ${NAMES[f.to][0]} luona. Spiraalilasku (${dv(f.dvArr)}, ${fmtDays(f.spiralIn/DAY)}) vie sen kiertoradalle ${orbitText(f.to)}.`
+    body.append(...aeroOption(f), make('p',null,f.spiralIn ? `Alus on ${NAMES[f.to][0]} luona. Spiraalilasku (${dv(f.dvArr)}, ${fmtDays(f.spiralIn/DAY)}) vie sen kiertoradalle ${orbitText(f.to)}.`
       : `Alus on ${NAMES[f.to][0]} luona. Jarrutuspoltto (${dv(f.dvArr)}) vie sen kiertoradalle ${orbitText(f.to)}.`),
-      actions(button('voyage-go',f.spiralIn ? 'Aloita spiraalilasku' : 'Jarruta kiertoradalle',capture)));
+      actions(button(aeroOption(f).length ? 'sky-btn' : 'voyage-go',f.spiralIn ? 'Aloita spiraalilasku' : aeroOption(f).length ? 'Jarruta moottorilla venyneelle radalle' : 'Jarruta kiertoradalle',()=>capture())));
   } else if(arrived && f.local) {
     body.append(make('p',null,`Polttoaine (${dv(game.fuel)}) ei riitä jarrutukseen (${dv(f.dvArr)}).`), actions(button('sky-btn','Aloita alusta',restart)));
   } else if(arrived) {
-    body.append(make('p',null,`Alus on ${NAMES[f.to][0]} luona, mutta polttoaine (${dv(game.fuel)}) ei riitä jarrutukseen (${dv(f.dvArr)}). Alus ohittaa planeetan ja jatkaa Auringon ympäri.`),
-      actions(button('voyage-go','Jatka ohilentoa',capture)));
+    const aero=aeroOption(f);
+    body.append(...aero, make('p',null,`Alus on ${NAMES[f.to][0]} luona, mutta polttoaine (${dv(game.fuel)}) ei riitä moottorijarrutukseen (${dv(f.dvArr)}). ${aero.length ? 'Ilman ilmajarrutusta alus' : 'Alus'} ohittaa planeetan ja jatkaa Auringon ympäri.`),
+      actions(button(aero.length ? 'sky-btn' : 'voyage-go','Jatka ohilentoa',()=>capture())));
   } else {
     const flyby=f.flyby && !f.flyby.done ? `Linkous ${NAMES[f.flyby.body][0]} ohi ${fmtDate(f.flyby.t)} ${fmtKm(f.flyby.rpKm-FLIGHT_BODIES[f.flyby.body].radiusKm)} korkeudelta. ` : '';
     const n=make('p','muted',notice || (f.local ? `Perillä ${fmtDate(f.arrive)} ${fmtClock(f.arrive)}.`
@@ -562,7 +582,9 @@ function readouts(t) {
 function cockpitState() {
   // Polton tärinä ja moottorin hehku vaimenevat muutamassa sekunnissa oikeaa aikaa.
   const burn=Math.max(0,1-(Date.now()-burnAt)/BURN_SHAKE_MS);
-  const t=simNow(), base={t, warp:WARPS[game.warp][0], shake:burn*0.7, thrust:burn};
+  // Ilmajarrutus: kova tärinä ja ikkunoiden takana hehkuva plasma, jotka hiipuvat kymmenessä sekunnissa.
+  const aero=Math.max(0,1-(Date.now()-aeroAt)/AERO_MS);
+  const t=simNow(), base={t, warp:WARPS[game.warp][0], shake:Math.max(burn*0.7,aero*0.95), thrust:burn, ...(aero>0 ? {sky:aero*0.75, skyColor:'#ff6a1f'} : {})};
   if(game.pad) {
     const L=launchState(game.ascent?.liftoff ?? null,t), sunDir=L.r.map(x=>-x/norm(L.r)), upDir=L.rel.r.map(x=>x/norm(L.rel.r));
     // Taivaan kirkkaus: päivällä sininen, hämärtyy Auringon laskiessa ja ilmakehän ohetessa korkeuden mukana.
@@ -827,23 +849,27 @@ function launch() {
   if(!p.spiralStarted) {game.fuel=Math.max(0,game.fuel-p.dvDep); burnAt=Date.now();}
   game.flight=p.local ? {...p, soi:p.arrive, exit:p.depart} : {...p, soi:soiEntry(p), exit:soiExit(p)};
   game.plan=null; game.drift=null; game.location=null; game.orbit=null;
+  game.lowOrbit=null; syncLowOrbit();
   game.log.push({t:p.depart, text:p.spiralStarted ? `Spiraalinousu valmis, siirtorata kohti ${NAMES[p.to][2]} alkoi`
     : `Lähtöpoltto ${fromText(p.from)} kohti ${NAMES[p.to][2]}${p.flyby ? ` ${NAMES[p.flyby.body][0]} kautta` : ''} (Δv ${dv(p.dvDep)})`});
   anchor(p.depart,0); render();
 }
 
-// Saapuminen: jarrutus kiertoradalle, tai ohilento, jos polttoaine ei riitä. Lento kirjataan lokikirjaan.
-function capture() {
-  const f=game.flight, captured=!f.miss && game.fuel>=f.dvArr-1e-9, stats=flightStats(f);
+// Saapuminen: jarrutus kiertoradalle moottorilla tai ilmajarrutuksella (aero), tai ohilento, jos polttoaine ei riitä.
+// Lento kirjataan lokikirjaan.
+function capture(aero = false) {
+  const f=game.flight, cost=aero ? aerobrakeDv(f.to) : f.dvArr, captured=!f.miss && game.fuel>=cost-1e-9, stats=flightStats(f);
   game.flights.push({fromName:isPlanet(f.from) ? f.from : 'Auringon kiertorata', to:f.to, depart:f.depart, arrive:f.arrive, km:stats.km, maxSpeed:stats.maxSpeed, captured});
   if(captured) {
-    game.fuel=Math.max(0,game.fuel-f.dvArr);
+    game.fuel=Math.max(0,game.fuel-cost);
     game.location=f.to; game.drift=null;
+    game.lowOrbit=aero ? f.to : null; syncLowOrbit();
     // Alus jää radalle siihen kohtaan, johon se saapui: jarrutuspoltto tehdään perikeskuksessa.
     game.orbit=orbitAt(f.to,shipView(f,f.arrive).r,f.arrive);
-    if(!f.spiralIn) burnAt=Date.now();
+    if(aero) aeroAt=Date.now(); else if(!f.spiralIn) burnAt=Date.now();
     const took=f.arrive-f.depart<2*DAY ? fmtDuration(f.arrive-f.depart).replace(/^0 vrk /,'') : fmtDays((f.arrive-f.depart)/DAY);
-    game.log.push({t:f.arrive, text:`Saapuminen ${NAMES[f.to][0]} kiertoradalle ${took} lennon jälkeen (Δv ${dv(f.dvArr)})`});
+    game.log.push({t:f.arrive, text:aero ? `Ilmajarrutus ${NAMES[f.to][0]} kaasukehässä ${took} lennon jälkeen: matalalla radalla ${orbitText(f.to)} (Δv ${dv(cost)})`
+      : `Saapuminen ${NAMES[f.to][0]} kiertoradalle ${took} lennon jälkeen (Δv ${dv(cost)})`});
     // Ionialus laskeutuu kiertoradalle spiraalina, joka kestää kuten kartoitus.
     if(f.spiralIn) game.survey={kind:'spiral', body:f.to, start:f.arrive, dur:f.spiralIn};
   } else {
@@ -896,7 +922,7 @@ function flybyDone() {
 
 function restart() {
   if(!confirm('Aloitetaanko alusta? Uusi lento lähtee laukaisualustalta Maan pinnalta täydellä polttoaineella.')) return;
-  game=fresh(); options=null; target=null; notice='';
+  game=fresh(); options=null; target=null; notice=''; syncLowOrbit();
   save(); render();
 }
 
